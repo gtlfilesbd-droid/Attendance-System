@@ -1,0 +1,636 @@
+{% extends 'base.html' %}
+
+{% block title %}Attendance Reports - Genesis Employee Attendance{% endblock %}
+
+{% block extra_css %}
+<style>
+    .report-filters {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 2rem;
+    }
+    
+    .data-table-container {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        overflow: hidden;
+    }
+    
+    .table {
+        margin-bottom: 0;
+    }
+    
+    .table thead {
+        background: #f8fafc;
+    }
+    
+    .status-badge {
+        padding: 0.35rem 0.75rem;
+        border-radius: 6px;
+        font-size: 0.85rem;
+        font-weight: 500;
+    }
+    
+    .chart-container {
+        position: relative;
+        height: 300px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <h2><i class="fas fa-chart-bar me-2"></i>Attendance Reports</h2>
+    <p>Generate and export detailed attendance reports</p>
+</div>
+
+<!-- Filters -->
+<div class="report-filters">
+    <div class="row g-3">
+        <div class="col-md-3">
+            <label class="form-label">Date Range</label>
+            <input type="date" class="form-control" id="startDate" value="{{ today|date:'Y-m-d' }}">
+        </div>
+        
+        <div class="col-md-3">
+            <label class="form-label">End Date</label>
+            <input type="date" class="form-control" id="endDate" value="{{ today|date:'Y-m-d' }}">
+        </div>
+        
+        <div class="col-md-2">
+            <label class="form-label">Department</label>
+            <select class="form-select" id="departmentSelect">
+                <option value="">All Departments</option>
+                <!-- Populated via JavaScript -->
+            </select>
+        </div>
+        
+        <div class="col-md-2">
+            <label class="form-label">Employee</label>
+            <select class="form-select" id="employeeSelect">
+                <option value="">All Employees</option>
+                <!-- Populated via JavaScript -->
+            </select>
+        </div>
+        
+        <div class="col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary w-100" onclick="loadReport()">
+                <i class="fas fa-search me-2"></i>Generate
+            </button>
+        </div>
+    </div>
+    
+    <div class="row mt-3">
+        <div class="col-12">
+            <div class="d-flex gap-2">
+                <button class="btn btn-success" onclick="exportCSV()">
+                    <i class="fas fa-file-csv me-2"></i>Export CSV
+                </button>
+                <button class="btn btn-danger" onclick="exportPDF()">
+                    <i class="fas fa-file-pdf me-2"></i>Export PDF
+                </button>
+                <button class="btn btn-info" onclick="exportJSON()">
+                    <i class="fas fa-file-code me-2"></i>Export JSON
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Summary Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success);">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <div class="value" id="summaryPresent">0</div>
+            <div class="label">Total Present</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="value" id="summaryLate">0</div>
+            <div class="label">Total Late</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="icon" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">
+                <i class="fas fa-times-circle"></i>
+            </div>
+            <div class="value" id="summaryAbsent">0</div>
+            <div class="label">Total Absent</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="icon" style="background: rgba(37, 99, 235, 0.1); color: var(--primary);">
+                <i class="fas fa-percentage"></i>
+            </div>
+            <div class="value" id="summaryRate">0%</div>
+            <div class="label">Attendance Rate</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts -->
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-chart-line me-2"></i>Attendance Trends
+            </h5>
+            <div class="chart-container">
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-chart-pie me-2"></i>Status Distribution
+            </h5>
+            <div class="chart-container">
+                <canvas id="distributionChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Data Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="data-table-container">
+            <div class="p-3 border-bottom">
+                <h5 class="mb-0">
+                    <i class="fas fa-table me-2"></i>Attendance Records
+                </h5>
+            </div>
+            
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="attendanceTable">
+                    <thead>
+                        <tr>
+                            <th>Employee</th>
+                            <th>Date</th>
+                            <th>Check In</th>
+                            <th>Check Out</th>
+                            <th>Hours</th>
+                            <th>Locations</th>
+                            <th>Status</th>
+                            <th>Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="attendanceTableBody">
+                        <tr>
+                            <td colspan="8" class="text-center py-5 text-muted">
+                                <i class="fas fa-info-circle fa-2x mb-2"></i>
+                                <p>Select filters and click "Generate" to view reports</p>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="p-3 border-top">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="text-muted">
+                        Showing <span id="recordCount">0</span> records
+                    </div>
+                    <nav>
+                        <ul class="pagination pagination-sm mb-0" id="pagination">
+                            <!-- Pagination will be added here -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let trendChart;
+    let distributionChart;
+    let reportData = [];
+    let currentPage = 1;
+    const itemsPerPage = 20;
+    
+    // Initialize charts
+    function initCharts() {
+        // Trend Chart
+        const trendCtx = document.getElementById('trendChart').getContext('2d');
+        trendChart = new Chart(trendCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Present',
+                    data: [],
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }, {
+                    label: 'Late',
+                    data: [],
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }, {
+                    label: 'Absent',
+                    data: [],
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'top',
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true
+                    }
+                }
+            }
+        });
+        
+        // Distribution Chart
+        const distCtx = document.getElementById('distributionChart').getContext('2d');
+        distributionChart = new Chart(distCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Present', 'Late', 'Half Day', 'Absent'],
+                datasets: [{
+                    data: [0, 0, 0, 0],
+                    backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'],
+                    borderWidth: 2,
+                    borderColor: '#fff'
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                    }
+                }
+            }
+        });
+    }
+    
+    // Load employees and departments
+    function loadFilters() {
+        fetch('/api/employees/', {
+            method: 'GET',
+            headers: getAuthHeaders(),
+            credentials: 'same-origin'
+        })
+        .then(response => response.json())
+        .then(data => {
+            const empSelect = document.getElementById('employeeSelect');
+            const deptSelect = document.getElementById('departmentSelect');
+            const departments = new Set();
+            
+            if (data.results) {
+                data.results.forEach(emp => {
+                    // Add employee
+                    const option = document.createElement('option');
+                    option.value = emp.id;
+                    option.textContent = `${emp.name} (${emp.employee_id})`;
+                    empSelect.appendChild(option);
+                    
+                    // Collect departments
+                    if (emp.department) {
+                        departments.add(emp.department);
+                    }
+                });
+            }
+            
+            // Add departments
+            departments.forEach(dept => {
+                const option = document.createElement('option');
+                option.value = dept;
+                option.textContent = dept;
+                deptSelect.appendChild(option);
+            });
+        })
+        .catch(error => console.error('Error loading filters:', error));
+    }
+    
+    // Load report data
+    function loadReport() {
+        const startDate = document.getElementById('startDate').value;
+        const endDate = document.getElementById('endDate').value;
+        const department = document.getElementById('departmentSelect').value;
+        const employeeId = document.getElementById('employeeSelect').value;
+        
+        if (!startDate || !endDate) {
+            showAlert('Please select a date range.', 'warning');
+            return;
+        }
+        
+        // Use the all-attendance endpoint with filters for better compatibility
+        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}`;
+        if (department) url += `&department=${department}`;
+        if (employeeId) url += `&employee_id=${employeeId}`;
+        
+        fetch(url, {
+            method: 'GET',
+            headers: getAuthHeaders(),
+            credentials: 'same-origin'
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Handle different response formats
+            if (data.success && data.data) {
+                reportData = Array.isArray(data.data) ? data.data : (data.data.results || []);
+            } else if (data.results) {
+                reportData = data.results;
+            } else if (Array.isArray(data)) {
+                reportData = data;
+            } else {
+                reportData = [];
+            }
+            updateSummary();
+            updateCharts();
+            displayTable();
+        })
+        .catch(error => {
+            console.error('Error loading report:', error);
+            showAlert('Error loading report. Please try again.', 'danger');
+        });
+    }
+    
+    // Update summary cards
+    function updateSummary() {
+        const present = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'PRESENT' || status === 'LATE' || status === 'HALF_DAY';
+        }).length;
+        const late = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'LATE';
+        }).length;
+        const absent = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'ABSENT';
+        }).length;
+        const total = reportData.length;
+        const rate = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
+        
+        document.getElementById('summaryPresent').textContent = present;
+        document.getElementById('summaryLate').textContent = late;
+        document.getElementById('summaryAbsent').textContent = absent;
+        document.getElementById('summaryRate').textContent = rate + '%';
+    }
+    
+    // Update charts
+    function updateCharts() {
+        // Group by date
+        const dateGroups = {};
+        reportData.forEach(record => {
+            const date = record.date || (record.employee_details && record.employee_details.date);
+            const status = record.status || (record.employee_details && record.employee_details.status);
+            if (!date) return;
+            
+            if (!dateGroups[date]) {
+                dateGroups[date] = { present: 0, late: 0, absent: 0 };
+            }
+            if (status === 'PRESENT' || status === 'HALF_DAY') {
+                dateGroups[date].present++;
+            } else if (status === 'LATE') {
+                dateGroups[date].late++;
+            } else if (status === 'ABSENT') {
+                dateGroups[date].absent++;
+            }
+        });
+        
+        const dates = Object.keys(dateGroups).sort();
+        const presentData = dates.map(d => dateGroups[d].present);
+        const lateData = dates.map(d => dateGroups[d].late);
+        const absentData = dates.map(d => dateGroups[d].absent);
+        
+        trendChart.data.labels = dates;
+        trendChart.data.datasets[0].data = presentData;
+        trendChart.data.datasets[1].data = lateData;
+        trendChart.data.datasets[2].data = absentData;
+        trendChart.update();
+        
+        // Update distribution
+        const present = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'PRESENT';
+        }).length;
+        const late = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'LATE';
+        }).length;
+        const halfDay = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'HALF_DAY';
+        }).length;
+        const absent = reportData.filter(r => {
+            const status = r.status || (r.employee_details && r.employee_details.status);
+            return status === 'ABSENT';
+        }).length;
+        
+        distributionChart.data.datasets[0].data = [present, late, halfDay, absent];
+        distributionChart.update();
+    }
+    
+    // Display table
+    function displayTable() {
+        const tbody = document.getElementById('attendanceTableBody');
+        const totalPages = Math.ceil(reportData.length / itemsPerPage);
+        const start = (currentPage - 1) * itemsPerPage;
+        const end = start + itemsPerPage;
+        const pageData = reportData.slice(start, end);
+        
+        if (pageData.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="8" class="text-center py-5 text-muted">
+                        <i class="fas fa-info-circle fa-2x mb-2"></i>
+                        <p>No attendance records found</p>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+        
+        let html = '';
+        pageData.forEach(record => {
+            const statusClass = {
+                'PRESENT': 'bg-success',
+                'LATE': 'bg-warning',
+                'HALF_DAY': 'bg-info',
+                'ABSENT': 'bg-danger'
+            }[record.status] || 'bg-secondary';
+            
+            const empDetails = record.employee_details || {};
+            const empName = record.employee_name || empDetails.name || 'N/A';
+            const empId = record.employee_id || empDetails.employee_id || '';
+            const status = record.status || 'N/A';
+            
+            html += `
+                <tr>
+                    <td>
+                        <div>
+                            <strong>${empName}</strong><br>
+                            <small class="text-muted">${empId}</small>
+                        </div>
+                    </td>
+                    <td>${record.date ? new Date(record.date).toLocaleDateString() : '—'}</td>
+                    <td>${record.check_in_time || '—'}</td>
+                    <td>${record.check_out_time || '—'}</td>
+                    <td>${record.total_hours || '—'}</td>
+                    <td><span class="badge bg-secondary">${record.total_locations_logged || 0}</span></td>
+                    <td><span class="status-badge ${statusClass}">${status}</span></td>
+                    <td><small class="text-muted">${record.remarks || '—'}</small></td>
+                </tr>
+            `;
+        });
+        
+        tbody.innerHTML = html;
+        document.getElementById('recordCount').textContent = reportData.length;
+        updatePagination(totalPages);
+    }
+    
+    // Update pagination
+    function updatePagination(totalPages) {
+        const pagination = document.getElementById('pagination');
+        if (totalPages <= 1) {
+            pagination.innerHTML = '';
+            return;
+        }
+        
+        let html = '';
+        for (let i = 1; i <= totalPages; i++) {
+            html += `
+                <li class="page-item ${i === currentPage ? 'active' : ''}">
+                    <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
+                </li>
+            `;
+        }
+        pagination.innerHTML = html;
+    }
+    
+    // Go to page
+    function goToPage(page) {
+        currentPage = page;
+        displayTable();
+    }
+    
+    // Export CSV
+    function exportCSV() {
+        if (reportData.length === 0) {
+            showAlert('No data to export. Please generate a report first.', 'warning');
+            return;
+        }
+        
+        const headers = ['Employee Name', 'Employee ID', 'Date', 'Check In', 'Check Out', 'Hours', 'Locations', 'Status', 'Remarks'];
+        const rows = reportData.map(r => [
+            r.employee_name || '',
+            r.employee_id || '',
+            r.date || '',
+            r.check_in_time || '',
+            r.check_out_time || '',
+            r.total_hours || '',
+            r.total_locations_logged || '',
+            r.status || '',
+            r.remarks || ''
+        ]);
+        
+        const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+    }
+    
+    // Export PDF (placeholder)
+    function exportPDF() {
+        showAlert('PDF export feature coming soon!', 'info');
+    }
+    
+    // Export JSON
+    function exportJSON() {
+        if (reportData.length === 0) {
+            showAlert('No data to export. Please generate a report first.', 'warning');
+            return;
+        }
+        
+        const json = JSON.stringify(reportData, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+    }
+    
+    // Get CSRF token for Django session auth
+    function getCSRFToken() {
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === 'csrftoken') {
+                return value;
+            }
+        }
+        const metaTag = document.querySelector('meta[name=csrf-token]');
+        return metaTag ? metaTag.getAttribute('content') : '';
+    }
+    
+    function getAuthHeaders() {
+        return {
+            'X-CSRFToken': getCSRFToken(),
+            'Content-Type': 'application/json'
+        };
+    }
+    
+    // Show alert
+    function showAlert(message, type) {
+        const alertDiv = document.createElement('div');
+        alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+        alertDiv.style.zIndex = '9999';
+        alertDiv.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(alertDiv);
+        setTimeout(() => alertDiv.remove(), 5000);
+    }
+    
+    // Initialize on page load
+    window.addEventListener('load', function() {
+        initCharts();
+        loadFilters();
+    });
+</script>
+{% endblock %}

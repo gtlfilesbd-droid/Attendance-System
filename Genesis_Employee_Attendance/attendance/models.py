@@ -1,0 +1,96 @@
+from django.db import models
+from employees.models import Employee
+
+
+class Attendance(models.Model):
+    """
+    Model to store daily attendance records
+    """
+    STATUS_CHOICES = [
+        ('PRESENT', 'Present'),
+        ('LATE', 'Late'),
+        ('HALF_DAY', 'Half-Day'),
+        ('ABSENT', 'Absent'),
+    ]
+    
+    # Auto-increment primary key (default)
+    id = models.AutoField(primary_key=True)
+    
+    # Foreign key to Employee
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='attendances',
+        db_index=True
+    )
+    
+    # Date (unique with employee)
+    date = models.DateField(db_index=True)
+    
+    # Time fields
+    first_location_time = models.TimeField(null=True, blank=True, help_text='Time of first location log')
+    last_location_time = models.TimeField(null=True, blank=True, help_text='Time of last location log')
+    check_in_time = models.TimeField(null=True, blank=True, help_text='Official check-in time')
+    check_out_time = models.TimeField(null=True, blank=True, help_text='Official check-out time')
+    
+    # Total hours worked
+    total_hours = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0.00,
+        help_text='Total hours worked'
+    )
+    
+    # Total locations logged
+    total_locations_logged = models.IntegerField(default=0, help_text='Number of location logs for the day')
+    
+    # Attendance status
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default='PRESENT',
+        db_index=True
+    )
+    
+    # Remarks (optional)
+    remarks = models.TextField(null=True, blank=True, help_text='Additional remarks or notes')
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'attendance'
+        ordering = ['-date', '-created_at']
+        verbose_name = 'Attendance'
+        verbose_name_plural = 'Attendance Records'
+        unique_together = [['employee', 'date']]
+        indexes = [
+            models.Index(fields=['employee', '-date'], name='idx_emp_date'),
+            models.Index(fields=['-date'], name='idx_date'),
+            models.Index(fields=['status'], name='idx_status'),
+            models.Index(fields=['employee', 'status'], name='idx_emp_status'),
+        ]
+    
+    def __str__(self):
+        return f"{self.employee.name} - {self.date} - {self.status}"
+    
+    def calculate_total_hours(self):
+        """Calculate total hours between check-in and check-out"""
+        if self.check_in_time and self.check_out_time:
+            from datetime import datetime, timedelta
+            
+            # Create datetime objects for today with the times
+            check_in = datetime.combine(datetime.today(), self.check_in_time)
+            check_out = datetime.combine(datetime.today(), self.check_out_time)
+            
+            # Handle case where check-out is past midnight
+            if check_out < check_in:
+                check_out += timedelta(days=1)
+            
+            # Calculate duration
+            duration = check_out - check_in
+            hours = duration.total_seconds() / 3600
+            self.total_hours = round(hours, 2)
+            return self.total_hours
+        return 0.00

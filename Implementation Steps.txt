@@ -1,0 +1,47 @@
+আমি আপনার জন্য একটি সম্পূর্ণ ইমপ্লিমেন্টেশন প্ল্যান তৈরি করে দিয়েছি যা আপনি সরাসরি Cursor AI Agent (Sonnet 4.5) কে দিতে পারবেন।
+এটি কীভাবে ব্যবহার করবেন:
+ধাপ ১: Cursor AI তে প্রজেক্ট শুরু করুন
+
+Cursor AI খুলুন
+একটি নতুন ফোল্ডার তৈরি করুন: employee-tracking-system
+Cursor এ সেই ফোল্ডার ওপেন করুন
+
+ধাপ ২: Phase by Phase কোড জেনারেট করুন
+প্রতিটি Phase এর প্রম্পট Cursor AI Agent কে দিন:
+উদাহরণ - Phase 1, Step 1.1:
+Cursor AI চ্যাটে এটি পেস্ট করুন:
+Create a Django project named "employee_tracking" with the following:
+
+1. Install required packages:
+   - Django==4.2
+   - djangorestframework
+   - django-cors-headers
+   - psycopg2-binary
+   - django-postgis
+   ...
+   (পুরো প্রম্পট কপি করুন আর্টিফ্যাক্ট থেকে)
+Cursor AI সব কোড জেনারেট করবে, ফাইল তৈরি করবে, এবং setup করে দেবে।
+ধাপ ৩: পরবর্তী Step এ যান
+একটি Step সম্পূর্ণ হলে, পরবর্তী Step এর প্রম্পট দিন।
+ধাপ ৪: মোবাইল অ্যাপ তৈরি করুন
+Phase 3 এ পৌঁছালে, একটি আলাদা ফোল্ডার mobile_app তৈরি করুন এবং Flutter প্রম্পটগুলো দিন।
+🎯 মূল বৈশিষ্ট্য যা পাবেন:
+✅ Backend: সম্পূর্ণ Django REST API
+✅ Auto Attendance: Celery দিয়ে স্বয়ংক্রিয় calculation
+✅ Web Dashboard: Real-time tracking + Route playback
+✅ Mobile App: Background GPS tracking (9:30 AM - 6:30 PM)
+✅ Database: PostgreSQL + PostGIS (location data)
+✅ Maps: Google Maps integration
+📋 যা আপনাকে করতে হবে:
+
+✅ প্রতিটি Phase এর প্রম্পট Cursor AI কে দিন
+✅ Generate হওয়া কোড রিভিউ করুন
+✅ প্রয়োজনে ছোটখাটো কাস্টমাইজেশন করুন
+✅ Testing করুন
+✅ Deploy করুন
+
+🔥 Pro Tips:
+
+একসাথে সব Phase এর প্রম্পট দেবেন না। একটার পর একটা দিন।
+প্রতিটি Step শেষে test করুন যে সব কাজ করছে কিনা।
+Cursor AI যদি কোনো জায়গায় আটকে যায়, তাকে বলুন: "Continue from where you left" অথবা "Complete the remaining part"

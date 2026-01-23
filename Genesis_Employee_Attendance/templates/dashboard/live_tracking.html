@@ -1,0 +1,341 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Live Tracking - Genesis Employee Attendance{% endblock %}
+
+{% block extra_css %}
+<style>
+    #map {
+        height: 80vh;
+        width: 100%;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .employee-list {
+        max-height: 75vh;
+        overflow-y: auto;
+    }
+    
+    .employee-item {
+        padding: 1rem;
+        border-bottom: 1px solid #e2e8f0;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    
+    .employee-item:hover {
+        background: #f8fafc;
+    }
+    
+    .employee-item.active {
+        background: rgba(37, 99, 235, 0.1);
+        border-left: 4px solid var(--primary);
+    }
+    
+    .status-indicator {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 0.5rem;
+    }
+    
+    .status-online {
+        background: #10b981;
+        box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+    }
+    
+    .status-offline {
+        background: #94a3b8;
+    }
+    
+    .refresh-controls {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        z-index: 1000;
+        background: white;
+        padding: 0.5rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    }
+    
+    .map-container {
+        position: relative;
+    }
+    
+    .last-update {
+        font-size: 0.85rem;
+        color: #64748b;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <h2><i class="fas fa-map-marked-alt me-2"></i>Live Employee Tracking</h2>
+    <p>Real-time location tracking of all active employees</p>
+</div>
+
+<div class="row g-4">
+    <!-- Map Container -->
+    <div class="col-lg-9">
+        <div class="stat-card p-0 map-container">
+            <div class="refresh-controls">
+                <button class="btn btn-sm btn-primary" onclick="refreshLocations()">
+                    <i class="fas fa-sync-alt" id="refreshIcon"></i> Refresh
+                </button>
+                <div class="last-update mt-2">
+                    <i class="fas fa-clock me-1"></i>
+                    <span id="lastUpdate">Loading...</span>
+                </div>
+            </div>
+            <div id="map"></div>
+        </div>
+    </div>
+    
+    <!-- Employee List Sidebar -->
+    <div class="col-lg-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">
+                    <i class="fas fa-users me-2"></i>Employees
+                </h5>
+                <span class="badge bg-primary" id="onlineCount">0</span>
+            </div>
+            
+            <div class="input-group mb-3">
+                <span class="input-group-text"><i class="fas fa-search"></i></span>
+                <input type="text" class="form-control" id="employeeSearch" placeholder="Search employee...">
+            </div>
+            
+            <div class="employee-list" id="employeeList">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading employees...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto-refresh Info -->
+<div class="row mt-3">
+    <div class="col-12">
+        <div class="alert alert-info d-flex align-items-center">
+            <i class="fas fa-info-circle me-2"></i>
+            <div>
+                <strong>Auto-refresh enabled:</strong> Locations are automatically updated every 30 seconds.
+                <span class="badge bg-primary ms-2" id="refreshTimer">30s</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/map_tracking.js' %}"></script>
+<script>
+    let mapTracker;
+    let countdownInterval;
+    let countdown = 30;
+    
+    // Initialize Leaflet Map
+    async function initMap() {
+        if (typeof L === 'undefined') {
+            console.error('Leaflet.js not loaded');
+            showAlert('Leaflet.js library is not loaded. Please check your internet connection.', 'danger');
+            return;
+        }
+        
+        try {
+            mapTracker = new MapTracking();
+            await mapTracker.initLiveMap('map');
+            
+            // Load initial locations
+            await refreshLocations();
+            
+            // Set up auto-refresh
+            mapTracker.startAutoRefresh(30000, (locations) => {
+                updateEmployeeList(locations);
+                updateLastUpdateTime();
+            });
+            
+            // Start countdown timer
+            startCountdown();
+        } catch (error) {
+            console.error('Error initializing map:', error);
+            showAlert('Error initializing map. Please check if Leaflet.js is loaded.', 'danger');
+        }
+    }
+    
+    // Fetch live locations from API
+    async function refreshLocations() {
+        const refreshIcon = document.getElementById('refreshIcon');
+        if (refreshIcon) refreshIcon.classList.add('fa-spin');
+        
+        try {
+            const locations = await mapTracker.fetchLiveLocations();
+            mapTracker.updateMapMarkers(locations);
+            updateEmployeeList(locations);
+            updateLastUpdateTime();
+        } catch (error) {
+            console.error('Error refreshing locations:', error);
+            showAlert('Error loading locations. Please try again.', 'danger');
+        } finally {
+            if (refreshIcon) refreshIcon.classList.remove('fa-spin');
+        }
+    }
+    
+    // Map update is now handled by mapTracker.updateMapMarkers()
+    
+    // Update employee list sidebar
+    function updateEmployeeList(locations) {
+        const employeeList = document.getElementById('employeeList');
+        const onlineCount = document.getElementById('onlineCount');
+        
+        if (!employeeList) return;
+        
+        if (!locations || locations.length === 0) {
+            employeeList.innerHTML = '<div class="text-center py-4 text-muted">No active employees</div>';
+            if (onlineCount) onlineCount.textContent = '0';
+            return;
+        }
+        
+        if (onlineCount) onlineCount.textContent = locations.length;
+        
+        let html = '';
+        locations.forEach(location => {
+            const employeeId = location.employee_id || location.employee_code || `emp_${locations.indexOf(location)}`;
+            const timestamp = location.timestamp;
+            const timeAgo = mapTracker ? mapTracker.formatTimestamp(timestamp) : getTimeAgo(new Date(timestamp));
+            const address = location.address || '';
+            
+            html += `
+                <div class="employee-item" onclick="focusEmployee('${employeeId}')">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <span class="status-indicator status-online"></span>
+                            <strong>${location.employee_name || 'Unknown'}</strong>
+                        </div>
+                    </div>
+                    <small class="text-muted d-block">${location.employee_id || location.employee_code || ''}</small>
+                    <small class="text-muted d-block mt-1">
+                        <i class="fas fa-clock"></i> ${timeAgo}
+                    </small>
+                    ${address ? `<small class="text-muted d-block mt-1"><i class="fas fa-map-marker-alt"></i> ${address.substring(0, 40)}${address.length > 40 ? '...' : ''}</small>` : ''}
+                </div>
+            `;
+        });
+        
+        employeeList.innerHTML = html;
+    }
+    
+    // Focus on specific employee marker
+    function focusEmployee(employeeId) {
+        const marker = mapTracker.markers[employeeId];
+        if (marker && mapTracker.map) {
+            const latLng = marker.getLatLng();
+            mapTracker.map.setView([latLng.lat, latLng.lng], 16);
+            marker.openPopup();
+        }
+    }
+    
+    // Get time ago string
+    function getTimeAgo(date) {
+        const seconds = Math.floor((new Date() - date) / 1000);
+        if (seconds < 60) return 'Just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        return `${hours}h ago`;
+    }
+    
+    // Update last update time
+    function updateLastUpdateTime() {
+        const now = new Date();
+        document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
+    }
+    
+    // Start countdown timer
+    function startCountdown() {
+        countdown = 30;
+        countdownInterval = setInterval(() => {
+            countdown--;
+            const timerEl = document.getElementById('refreshTimer');
+            if (timerEl) timerEl.textContent = countdown + 's';
+            if (countdown <= 0) {
+                countdown = 30;
+            }
+        }, 1000);
+    }
+    
+    // Get CSRF token for Django session auth
+    function getCSRFToken() {
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === 'csrftoken') {
+                return value;
+            }
+        }
+        // Fallback: try to get from meta tag
+        const metaTag = document.querySelector('meta[name=csrf-token]');
+        return metaTag ? metaTag.getAttribute('content') : '';
+    }
+    
+    // Get auth headers for Django session authentication
+    function getAuthHeaders() {
+        return {
+            'X-CSRFToken': getCSRFToken(),
+            'Content-Type': 'application/json'
+        };
+    }
+    
+    // Show alert (using mapTracker's method if available, otherwise fallback)
+    function showAlert(message, type) {
+        if (mapTracker && mapTracker.showAlert) {
+            mapTracker.showAlert(message, type);
+        } else {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+            alertDiv.style.zIndex = '9999';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+    }
+    
+    // Employee search
+    document.getElementById('employeeSearch').addEventListener('input', function(e) {
+        const searchTerm = e.target.value.toLowerCase();
+        const items = document.querySelectorAll('.employee-item');
+        items.forEach(item => {
+            const text = item.textContent.toLowerCase();
+            item.style.display = text.includes(searchTerm) ? 'block' : 'none';
+        });
+    });
+    
+    // Initialize map when page loads
+    if (typeof L !== 'undefined') {
+        window.addEventListener('load', initMap);
+    } else {
+        // Wait for Leaflet to load
+        window.addEventListener('load', function() {
+            const checkInterval = setInterval(() => {
+                if (typeof L !== 'undefined') {
+                    clearInterval(checkInterval);
+                    initMap();
+                }
+            }, 100);
+        });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+version: '3.8'
+
+# Production Docker Compose Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  web:
+    command: gunicorn --bind 0.0.0.0:8000 --workers 4 --timeout 120 config.wsgi:application
+    environment:
+      - DEBUG=False
+    restart: always
+
+  celery:
+    restart: always
+
+  celery-beat:
+    restart: always
+
+  db:
+    restart: always
+    # Uncomment for production backup
+    # volumes:
+    #   - postgres_data:/var/lib/postgresql/data
+    #   - ./backups:/backups
+
+  redis:
+    restart: always

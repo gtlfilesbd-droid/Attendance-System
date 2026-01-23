@@ -1,0 +1,501 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Route History - Genesis Employee Attendance{% endblock %}
+
+{% block extra_css %}
+<style>
+    #routeMap {
+        height: 70vh;
+        width: 100%;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .route-timeline {
+        max-height: 25vh;
+        overflow-y: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem;
+    }
+    
+    .timeline-item {
+        padding: 0.75rem;
+        border-left: 3px solid #e2e8f0;
+        margin-bottom: 0.75rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .timeline-item:hover {
+        background: #f8fafc;
+        border-left-color: var(--primary);
+    }
+    
+    .timeline-item.active {
+        background: rgba(37, 99, 235, 0.1);
+        border-left-color: var(--primary);
+    }
+    
+    .playback-controls {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    
+    .speed-control {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    
+    .speed-btn {
+        padding: 0.25rem 0.75rem;
+        border: 1px solid #e2e8f0;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+    
+    .speed-btn.active {
+        background: var(--primary);
+        color: white;
+        border-color: var(--primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <h2><i class="fas fa-route me-2"></i>Route History</h2>
+    <p>View and replay employee movement routes</p>
+</div>
+
+<!-- Filters -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <label class="form-label">Employee</label>
+        <select class="form-select" id="employeeSelect">
+            <option value="">All Employees</option>
+            <!-- Populated via JavaScript -->
+        </select>
+    </div>
+    
+    <div class="col-md-3">
+        <label class="form-label">Date</label>
+        <input type="date" class="form-control" id="dateSelect" value="{{ today|date:'Y-m-d' }}">
+    </div>
+    
+    <div class="col-md-2">
+        <label class="form-label">Start Time</label>
+        <input type="time" class="form-control" id="startTime">
+    </div>
+    
+    <div class="col-md-2">
+        <label class="form-label">End Time</label>
+        <input type="time" class="form-control" id="endTime">
+    </div>
+    
+    <div class="col-md-2 d-flex align-items-end">
+        <button class="btn btn-primary w-100" onclick="loadRoute()">
+            <i class="fas fa-search me-2"></i>Load Route
+        </button>
+    </div>
+</div>
+
+<!-- Map Container -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="stat-card p-0">
+            <div id="routeMap"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Playback Controls -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="playback-controls">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-primary" id="playBtn" onclick="togglePlayback()">
+                            <i class="fas fa-play" id="playIcon"></i>
+                            <span id="playText">Play</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="resetPlayback()">
+                            <i class="fas fa-redo"></i> Reset
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="col-md-4">
+                    <div class="speed-control">
+                        <label class="mb-0">Speed:</label>
+                        <button class="speed-btn" onclick="setSpeed(0.5)">0.5x</button>
+                        <button class="speed-btn active" onclick="setSpeed(1)">1x</button>
+                        <button class="speed-btn" onclick="setSpeed(2)">2x</button>
+                        <button class="speed-btn" onclick="setSpeed(5)">5x</button>
+                    </div>
+                </div>
+                
+                <div class="col-md-4 text-end">
+                    <div class="d-flex align-items-center justify-content-end gap-2">
+                        <span class="text-muted">Progress:</span>
+                        <div class="progress flex-grow-1" style="max-width: 200px;">
+                            <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%"></div>
+                        </div>
+                        <span class="text-muted" id="progressText">0/0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Route Timeline -->
+<div class="row">
+    <div class="col-12">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-list me-2"></i>Route Timeline
+            </h5>
+            <div class="route-timeline" id="routeTimeline">
+                <div class="text-center py-4 text-muted">
+                    <i class="fas fa-map-marked-alt fa-2x mb-2"></i>
+                    <p>Select filters and click "Load Route" to view route history</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% load static %}
+<script src="{% static 'js/map_tracking.js' %}"></script>
+<script>
+    let mapTracker;
+    let routeData = [];
+    
+    // Initialize map
+    async function initRouteMap() {
+        if (typeof L === 'undefined') {
+            console.error('Leaflet.js not loaded');
+            showAlert('Leaflet.js library is not loaded. Please check your internet connection.', 'danger');
+            return;
+        }
+        
+        try {
+            mapTracker = new MapTracking();
+            await mapTracker.initRouteMap('routeMap');
+            
+            // Set up callbacks
+            mapTracker.onProgressUpdate = (current, total) => {
+                updateProgress(current, total);
+            };
+            
+            mapTracker.onLocationChange = (index, location) => {
+                highlightTimelineItem(index);
+            };
+            
+            mapTracker.onPlaybackComplete = () => {
+                const playIcon = document.getElementById('playIcon');
+                const playText = document.getElementById('playText');
+                if (playIcon) playIcon.className = 'fas fa-play';
+                if (playText) playText.textContent = 'Play';
+            };
+            
+            // Load employees for dropdown
+            loadEmployees();
+        } catch (error) {
+            console.error('Error initializing route map:', error);
+            showAlert('Error initializing map. Please check if Leaflet.js is loaded.', 'danger');
+        }
+    }
+    
+    // Load employees list
+    async function loadEmployees() {
+        try {
+            const response = await fetch('/api/employees/', {
+                method: 'GET',
+                headers: mapTracker ? mapTracker.getAuthHeaders() : getAuthHeaders(),
+                credentials: 'same-origin'
+            });
+            
+            const data = await response.json();
+            const select = document.getElementById('employeeSelect');
+            
+            if (select && data.results) {
+                // Clear existing options except the first one
+                while (select.options.length > 1) {
+                    select.remove(1);
+                }
+                
+                data.results.forEach(emp => {
+                    const option = document.createElement('option');
+                    option.value = emp.id;
+                    option.textContent = `${emp.name} (${emp.employee_id || ''})`;
+                    select.appendChild(option);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading employees:', error);
+            showAlert('Error loading employees list.', 'danger');
+        }
+    }
+    
+    // Load route data
+    async function loadRoute() {
+        const employeeId = document.getElementById('employeeSelect').value;
+        const date = document.getElementById('dateSelect').value;
+        const startTime = document.getElementById('startTime').value;
+        const endTime = document.getElementById('endTime').value;
+        
+        if (!employeeId || !date) {
+            showAlert('Please select an employee and date.', 'warning');
+            return;
+        }
+        
+        try {
+            // Show loading
+            const timeline = document.getElementById('routeTimeline');
+            if (timeline) {
+                mapTracker.showLoading('routeTimeline');
+            }
+            
+            const routeDataResponse = await mapTracker.fetchEmployeeRoute(
+                employeeId, 
+                date, 
+                startTime || null, 
+                endTime || null
+            );
+            
+            if (routeDataResponse && routeDataResponse.locations && routeDataResponse.locations.length > 0) {
+                routeData = routeDataResponse.locations;
+                displayRoute();
+                updateTimeline();
+                
+                // Display route stats if available
+                if (routeDataResponse.total_distance_km) {
+                    console.log('Route distance:', routeDataResponse.total_distance_km, 'km');
+                }
+            } else {
+                showAlert('No route data found for the selected criteria.', 'info');
+                clearRoute();
+                if (timeline) {
+                    mapTracker.hideLoading('routeTimeline', '<div class="text-center py-4 text-muted">No route data</div>');
+                }
+            }
+        } catch (error) {
+            console.error('Error loading route:', error);
+            showAlert('Error loading route. Please try again.', 'danger');
+            const timeline = document.getElementById('routeTimeline');
+            if (timeline) {
+                mapTracker.hideLoading('routeTimeline', '<div class="text-center py-4 text-muted">Error loading route</div>');
+            }
+        }
+    }
+    
+    // Display route on map
+    function displayRoute() {
+        if (!mapTracker || routeData.length === 0) return;
+        
+        // Draw route polyline
+        mapTracker.drawRoute(routeData);
+        
+        // Add start/end markers
+        mapTracker.addRouteMarkers(routeData);
+        
+        // Reset playback
+        resetPlayback();
+    }
+    
+    // Update timeline
+    function updateTimeline() {
+        const timeline = document.getElementById('routeTimeline');
+        
+        if (!timeline) return;
+        
+        if (routeData.length === 0) {
+            timeline.innerHTML = '<div class="text-center py-4 text-muted">No route data</div>';
+            return;
+        }
+        
+        let html = '';
+        routeData.forEach((loc, index) => {
+            const timestamp = loc.timestamp || loc.created_at;
+            const date = timestamp ? new Date(timestamp) : new Date();
+            const formattedTime = mapTracker ? mapTracker.formatTimestamp(timestamp) : date.toLocaleTimeString();
+            const address = loc.address || '';
+            const speed = loc.speed ? (loc.speed * 3.6).toFixed(1) : null;
+            
+            html += `
+                <div class="timeline-item" onclick="jumpToLocation(${index})" id="timeline-${index}">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <strong>${formattedTime}</strong>
+                            ${address ? `<div class="text-muted small mt-1">${address.substring(0, 50)}${address.length > 50 ? '...' : ''}</div>` : ''}
+                        </div>
+                        <div class="text-end">
+                            <small class="text-muted">${index + 1}/${routeData.length}</small>
+                            ${speed ? `<div class="small text-muted"><i class="fas fa-tachometer-alt"></i> ${speed} km/h</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        
+        timeline.innerHTML = html;
+    }
+    
+    // Clear route
+    function clearRoute() {
+        if (mapTracker && mapTracker.map) {
+            if (mapTracker.routePolyline) {
+                mapTracker.map.removeLayer(mapTracker.routePolyline);
+                mapTracker.routePolyline = null;
+            }
+            mapTracker.routeMarkers.forEach(marker => mapTracker.map.removeLayer(marker));
+            mapTracker.routeMarkers = [];
+        }
+        routeData = [];
+    }
+    
+    // Toggle playback
+    function togglePlayback() {
+        if (!mapTracker || routeData.length === 0) {
+            showAlert('No route data to play.', 'warning');
+            return;
+        }
+        
+        mapTracker.playbackRoute(routeData, { speed: mapTracker.playbackSpeed });
+        
+        const playIcon = document.getElementById('playIcon');
+        const playText = document.getElementById('playText');
+        
+        if (mapTracker.isPlaying) {
+            if (playIcon) playIcon.className = 'fas fa-pause';
+            if (playText) playText.textContent = 'Pause';
+        } else {
+            if (playIcon) playIcon.className = 'fas fa-play';
+            if (playText) playText.textContent = 'Play';
+        }
+    }
+    
+    // Jump to specific location
+    function jumpToLocation(index) {
+        if (mapTracker) {
+            mapTracker.jumpToLocation(index);
+        }
+    }
+    
+    // Reset playback
+    function resetPlayback() {
+        if (mapTracker) {
+            mapTracker.stopPlayback();
+        }
+        const playIcon = document.getElementById('playIcon');
+        const playText = document.getElementById('playText');
+        if (playIcon) playIcon.className = 'fas fa-play';
+        if (playText) playText.textContent = 'Play';
+        updateProgress(0, routeData.length);
+        
+        // Clear active timeline items
+        document.querySelectorAll('.timeline-item').forEach(item => {
+            item.classList.remove('active');
+        });
+    }
+    
+    // Set playback speed
+    function setSpeed(speed) {
+        if (mapTracker) {
+            mapTracker.setPlaybackSpeed(speed);
+        }
+        document.querySelectorAll('.speed-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        if (event && event.target) {
+            event.target.classList.add('active');
+        }
+    }
+    
+    // Update progress
+    function updateProgress(current, total) {
+        const progress = total > 0 ? (current / total) * 100 : 0;
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        if (progressBar) progressBar.style.width = progress + '%';
+        if (progressText) progressText.textContent = `${current}/${total}`;
+    }
+    
+    // Highlight timeline item
+    function highlightTimelineItem(index) {
+        document.querySelectorAll('.timeline-item').forEach((item, i) => {
+            item.classList.toggle('active', i === index);
+        });
+        
+        // Scroll timeline item into view
+        const timelineItem = document.getElementById(`timeline-${index}`);
+        if (timelineItem) {
+            timelineItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+    
+    // Get CSRF token for Django session auth
+    function getCSRFToken() {
+        const cookies = document.cookie.split(';');
+        for (let cookie of cookies) {
+            const [name, value] = cookie.trim().split('=');
+            if (name === 'csrftoken') {
+                return value;
+            }
+        }
+        const metaTag = document.querySelector('meta[name=csrf-token]');
+        return metaTag ? metaTag.getAttribute('content') : '';
+    }
+    
+    function getAuthHeaders() {
+        return {
+            'X-CSRFToken': getCSRFToken(),
+            'Content-Type': 'application/json'
+        };
+    }
+    
+    // Show alert
+    function showAlert(message, type) {
+        if (mapTracker && mapTracker.showAlert) {
+            mapTracker.showAlert(message, type);
+        } else {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3`;
+            alertDiv.style.zIndex = '9999';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+    }
+    
+    // Initialize on page load
+    if (typeof L !== 'undefined') {
+        window.addEventListener('load', initRouteMap);
+    } else {
+        // Wait for Leaflet to load
+        window.addEventListener('load', function() {
+            const checkInterval = setInterval(() => {
+                if (typeof L !== 'undefined') {
+                    clearInterval(checkInterval);
+                    initRouteMap();
+                }
+            }, 100);
+        });
+    }
+</script>
+{% endblock %}

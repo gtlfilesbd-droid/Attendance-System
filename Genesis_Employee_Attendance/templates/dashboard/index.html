@@ -1,0 +1,334 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard - Genesis Employee Attendance{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header">
+    <h2><i class="fas fa-tachometer-alt me-2"></i>Dashboard Overview</h2>
+    <p>Real-time attendance statistics and recent activities</p>
+</div>
+
+<!-- Statistics Cards -->
+<div class="row g-4 mb-4">
+    <div class="col-md-3 col-sm-6">
+        <div class="stat-card primary">
+            <div class="icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="value">{{ stats.total_employees }}</div>
+            <div class="label">Total Employees</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6">
+        <div class="stat-card success">
+            <div class="icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <div class="value">{{ stats.present_count }}</div>
+            <div class="label">Present Today</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6">
+        <div class="stat-card warning">
+            <div class="icon">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="value">{{ stats.late_count }}</div>
+            <div class="label">Late Today</div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 col-sm-6">
+        <div class="stat-card danger">
+            <div class="icon">
+                <i class="fas fa-times-circle"></i>
+            </div>
+            <div class="value">{{ stats.absent_count }}</div>
+            <div class="label">Absent Today</div>
+        </div>
+    </div>
+</div>
+
+<!-- Charts Row -->
+<div class="row g-4 mb-4">
+    <div class="col-lg-8">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-chart-line me-2"></i>Attendance Trend (Last 7 Days)
+            </h5>
+            <canvas id="attendanceChart" height="80"></canvas>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-chart-pie me-2"></i>Today's Distribution
+            </h5>
+            <canvas id="distributionChart" height="200"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Additional Stats -->
+<div class="row g-4 mb-4">
+    <div class="col-md-6">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-percentage me-2"></i>Attendance Rate
+            </h5>
+            <div class="d-flex align-items-center">
+                <div class="flex-grow-1">
+                    <div class="progress" style="height: 35px;">
+                        <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: {{ stats.attendance_percentage }}%;" 
+                             aria-valuenow="{{ stats.attendance_percentage }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            <strong>{{ stats.attendance_percentage }}%</strong>
+                        </div>
+                    </div>
+                    <small class="text-muted mt-2 d-block">
+                        {{ stats.present_count }} out of {{ stats.total_employees }} employees present
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-info-circle me-2"></i>Today's Summary
+            </h5>
+            <div class="row text-center">
+                <div class="col-3">
+                    <div class="value" style="font-size: 1.75rem; color: var(--success);">{{ stats.present_count }}</div>
+                    <small class="text-muted d-block">Present</small>
+                </div>
+                <div class="col-3">
+                    <div class="value" style="font-size: 1.75rem; color: var(--warning);">{{ stats.late_count }}</div>
+                    <small class="text-muted d-block">Late</small>
+                </div>
+                <div class="col-3">
+                    <div class="value" style="font-size: 1.75rem; color: var(--primary);">{{ stats.half_day_count }}</div>
+                    <small class="text-muted d-block">Half Day</small>
+                </div>
+                <div class="col-3">
+                    <div class="value" style="font-size: 1.75rem; color: var(--danger);">{{ stats.absent_count }}</div>
+                    <small class="text-muted d-block">Absent</small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activities -->
+<div class="row">
+    <div class="col-12">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">
+                    <i class="fas fa-history me-2"></i>Recent Location Updates
+                </h5>
+                <a href="{% url 'live-tracking' %}" class="btn btn-sm btn-primary">
+                    <i class="fas fa-map-marked-alt me-1"></i>View Live Map
+                </a>
+            </div>
+            
+            {% if recent_activities %}
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Employee</th>
+                            <th>Date</th>
+                            <th>Check In</th>
+                            <th>Check Out</th>
+                            <th>Hours</th>
+                            <th>Locations</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for activity in recent_activities %}
+                        <tr>
+                            <td>
+                                <div>
+                                    <strong>{{ activity.employee.name }}</strong><br>
+                                    <small class="text-muted">{{ activity.employee.employee_id }}</small>
+                                </div>
+                            </td>
+                            <td>{{ activity.date|date:"M d, Y" }}</td>
+                            <td>
+                                {% if activity.check_in_time %}
+                                    <span class="badge bg-success">{{ activity.check_in_time }}</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if activity.check_out_time %}
+                                    <span class="badge bg-info">{{ activity.check_out_time }}</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if activity.total_hours %}
+                                    <strong>{{ activity.total_hours }}h</strong>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary">{{ activity.total_locations_logged }}</span>
+                            </td>
+                            <td>
+                                {% if activity.status == 'PRESENT' %}
+                                    <span class="badge bg-success">Present</span>
+                                {% elif activity.status == 'LATE' %}
+                                    <span class="badge bg-warning">Late</span>
+                                {% elif activity.status == 'HALF_DAY' %}
+                                    <span class="badge bg-info">Half Day</span>
+                                {% elif activity.status == 'ABSENT' %}
+                                    <span class="badge bg-danger">Absent</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ activity.status }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i>No recent activities found.
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="stat-card">
+            <h5 class="mb-3">
+                <i class="fas fa-bolt me-2"></i>Quick Actions
+            </h5>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="{% url 'live-tracking' %}" class="btn btn-primary">
+                    <i class="fas fa-map-marked-alt me-2"></i>View Live Tracking
+                </a>
+                <a href="{% url 'attendance-reports' %}" class="btn btn-success">
+                    <i class="fas fa-file-download me-2"></i>Generate Report
+                </a>
+                <a href="{% url 'route-history' %}" class="btn btn-info">
+                    <i class="fas fa-route me-2"></i>View Route History
+                </a>
+                <a href="/admin/" class="btn btn-secondary" target="_blank">
+                    <i class="fas fa-cog me-2"></i>Admin Panel
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Attendance Trend Chart (Last 7 Days)
+    const attendanceCtx = document.getElementById('attendanceChart').getContext('2d');
+    const attendanceChart = new Chart(attendanceCtx, {
+        type: 'line',
+        data: {
+            labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            datasets: [{
+                label: 'Present',
+                data: [85, 88, 82, 90, 87, 45, 30],
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                tension: 0.4,
+                fill: true
+            }, {
+                label: 'Late',
+                data: [5, 3, 7, 2, 4, 2, 1],
+                borderColor: '#f59e0b',
+                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                tension: 0.4,
+                fill: true
+            }, {
+                label: 'Absent',
+                data: [10, 9, 11, 8, 9, 53, 69],
+                borderColor: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    position: 'top',
+                },
+                title: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    max: 100
+                }
+            }
+        }
+    });
+    
+    // Distribution Pie Chart
+    const distributionCtx = document.getElementById('distributionChart').getContext('2d');
+    const distributionChart = new Chart(distributionCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Present', 'Late', 'Half Day', 'Absent'],
+            datasets: [{
+                data: [
+                    {{ stats.present_count }},
+                    {{ stats.late_count }},
+                    {{ stats.half_day_count }},
+                    {{ stats.absent_count }}
+                ],
+                backgroundColor: [
+                    '#10b981',
+                    '#f59e0b',
+                    '#3b82f6',
+                    '#ef4444'
+                ],
+                borderWidth: 2,
+                borderColor: '#fff'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                }
+            }
+        }
+    });
+    
+    // Auto-refresh dashboard every 60 seconds
+    setInterval(function() {
+        location.reload();
+    }, 60000);
+</script>
+{% endblock %}
