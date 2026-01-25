@@ -52,7 +52,17 @@ class Employee(models.Model):
     def check_password(self, raw_password):
         """Check if password matches"""
         return check_password(raw_password, self.password)
-    
+
+    @property
+    def is_authenticated(self):
+        """Always return True. This is a way to tell if the user has been authenticated in templates."""
+        return True
+
+    @property
+    def is_staff(self):
+        """Return False for regular employees unless promoted (future proofing)"""
+        return False
+
     def save(self, *args, **kwargs):
         # Hash password if it's not already hashed
         if self.password and not self.password.startswith('pbkdf2_'):

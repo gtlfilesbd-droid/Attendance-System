@@ -267,17 +267,15 @@ install.bat
 ## 🧪 Testing
 
 ```bash
-# Run Django tests
-python manage.py test
+# Run Django tests (using Docker)
+docker compose run --rm web python manage.py test tests/
 
 # Test Celery tasks
 python test_celery.py
-
-# Test API
-curl -X POST http://localhost:8000/api/auth/login/ \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@genesis.com","password":"admin123"}'
 ```
+
+For detailed testing instructions, see [TESTING.md](TESTING.md).
+
 
 ---
 
