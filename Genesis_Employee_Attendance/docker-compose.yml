@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: postgis/postgis:15-3.3
@@ -33,6 +31,7 @@ services:
     restart: unless-stopped
     volumes:
       - .:/app
+      - ../.cursor:/.workspace_cursor
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     ports:
@@ -49,6 +48,7 @@ services:
       - DB_PORT=5432
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DEBUG_LOG_PATH=/.workspace_cursor/debug.log
 
   celery:
     build: .

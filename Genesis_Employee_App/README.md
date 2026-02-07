@@ -17,6 +17,7 @@ Flutter mobile application for Genesis Employee Attendance System.
 ```bash
 flutter pub get
 ```
+   If that fails (network or timeout), run `pub-get.bat` from the app folder, or try again with a working internet connection. The app uses the `geocoding` package (^3.0.0) for current-location place names.
 
 2. Configure API endpoint in `lib/config/app_config.dart`
 
@@ -41,6 +42,24 @@ flutter run
 
 The app connects to the Django backend at:
 - Base URL: `http://your-server:8000/api/`
+
+## Build & Release
+
+- **Scripts:** Run `build-release.bat` (Windows) or `./build-release.sh` (macOS/Linux) to build APK, App Bundle, or iOS release.
+- **Signed APK:** Configure `android/key.properties` from `android/key.properties.example`, then `flutter build apk --release`
+- **Play Store:** `flutter build appbundle --release` and upload the AAB
+- **iOS:** Open `ios/Runner.xcworkspace` in Xcode, set signing, then **Product → Archive**
+- **Screenshots:** Add store listing screenshots to `docs/screenshots/` (see [BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)).
+
+See **[docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)** for signing setup, Play Store and App Store checklists, and store listing (screenshots and descriptions).
+
+## Testing
+
+- **Unit & widget tests:** `flutter test test/unit test/widget`
+- **All tests (including integration):** `flutter test`
+- **Integration tests on device:** `flutter test integration_test/`
+
+See [test/TEST_SCENARIOS.md](test/TEST_SCENARIOS.md) for scenario descriptions and app kill/restart steps.
 
 ## Build
 

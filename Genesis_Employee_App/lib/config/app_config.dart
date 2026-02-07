@@ -1,17 +1,21 @@
 class AppConfig {
-  // API Configuration
-  // Detected LAN IP: 192.168.68.50
+  // API Configuration - PC IP: 192.168.68.73 (Web PC where Django/Docker runs)
   // Use 10.0.2.2 for Android Emulator, localhost for iOS Simulator
-  static const String baseUrl = 'http://192.168.68.50:8000/api';
+  static const String baseUrl = 'http://192.168.68.73:8000/api';
   
   // API Endpoints
   static const String loginEndpoint = '/employees/auth/login/';
+  static const String tokenRefreshEndpoint = '/auth/token/refresh/';
   static const String locationLogEndpoint = '/tracking/log-location/';
   static const String myAttendanceEndpoint = '/attendance/my-attendance/';
   static const String employeeProfileEndpoint = '/employees/me/';
   
   // Location Tracking Configuration
-  static const int locationUpdateInterval = 300; // 5 minutes in seconds
+  static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)
+  /// Interval in seconds when duty is active (Start Duty). Location sent every N seconds.
+  static const int locationUpdateIntervalSecondsWhenDuty = 5;
+  /// Interval in minutes to auto-refresh current location name on home screen.
+  static const int placeNameRefreshMinutes = 15;
   static const double locationAccuracy = 10.0; // meters
   
   // Storage Keys

@@ -217,7 +217,19 @@ class RouteHistorySerializer(serializers.Serializer):
                 'latitude': locations.last().latitude,
                 'longitude': locations.last().longitude,
             },
-            'locations': locations,
+            # Plain list so app gets response.data['data']['locations'].length (not GeoJSON FeatureCollection)
+            'locations': [
+                {
+                    'id': loc.id,
+                    'latitude': loc.latitude,
+                    'longitude': loc.longitude,
+                    'timestamp': loc.timestamp,
+                    'accuracy': loc.accuracy,
+                    'battery_level': loc.battery_level,
+                    'address': loc.address,
+                }
+                for loc in locations
+            ],
             'total_distance_meters': round(total_distance, 2),
             'total_distance_km': round(total_distance / 1000, 2),
             'duration_minutes': round(duration, 2),

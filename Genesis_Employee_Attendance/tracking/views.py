@@ -1,3 +1,6 @@
+import json
+import logging
+import os
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
@@ -16,6 +19,24 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 from django.conf import settings
 
+logger = logging.getLogger('tracking')
+
+
+def _get_time_ago(timestamp):
+    """Return human-readable time ago string for a timestamp."""
+    diff = timezone.now() - timestamp
+    total_seconds = int(diff.total_seconds())
+    if total_seconds < 0:
+        return 'just now'
+    if total_seconds < 60:
+        return f'{total_seconds} seconds ago'
+    if total_seconds < 3600:
+        return f'{total_seconds // 60} minutes ago'
+    if total_seconds < 86400:
+        return f'{total_seconds // 3600} hours ago'
+    days = total_seconds // 86400
+    return f'{days} day{"s" if days != 1 else ""} ago'
+
 
 class StandardResultsSetPagination(PageNumberPagination):
     """Standard pagination class"""
@@ -33,7 +54,7 @@ def log_location(request):
     
     Request body:
     {
-        "employee": "uuid",
+        "employee": "uuid",  (optional if JWT identifies employee)
         "latitude": 37.7749,
         "longitude": -122.4194,
         "timestamp": "2024-01-15T10:30:00Z",
@@ -43,29 +64,56 @@ def log_location(request):
         "address": "123 Main St"
     }
     
-    Validates employee token and saves location with timestamp
+    With EmployeeJWTAuthentication, request.user is the Employee instance.
+    Validates employee and saves location with timestamp.
     """
-    # Set employee from authenticated user if not provided
-    data = request.data.copy()
-    if 'employee' not in data or not data['employee']:
-        data['employee'] = str(request.user.id)
-    
-    serializer = LocationCreateSerializer(data=data)
-    
-    if serializer.is_valid():
-        location_log = serializer.save()
-        
+    try:
+        # #region agent log
+        try:
+            _lp = os.environ.get('DEBUG_LOG_PATH', r'e:\Attendance System\.cursor\debug.log')
+            _u = request.user
+            with open(_lp, 'a') as _f:
+                _f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'H2', 'location': 'tracking/views.py:log_location', 'message': 'log_location_request', 'data': {'employee_id': str(getattr(_u, 'id', None)), 'email': getattr(_u, 'email', None)}, 'timestamp': __import__('time').time() * 1000}) + '\n')
+        except Exception:
+            pass
+        # #endregion
+        logger.debug("log_location: received request from user=%s", request.user)
+        logger.debug("log_location: request data=%s", request.data)
+
+        # Set employee from authenticated user if not provided (request.user is Employee with custom JWT)
+        data = request.data.copy()
+        if 'employee' not in data or not data['employee']:
+            data['employee'] = str(request.user.id)
+
+        serializer = LocationCreateSerializer(data=data)
+
+        if serializer.is_valid():
+            location_log = serializer.save()
+            logger.debug("log_location: location saved id=%s", location_log.id)
+            logger.info(
+                "log_location: created location_log_id=%s employee_id=%s",
+                location_log.id,
+                request.user.id,
+            )
+            return Response({
+                'success': True,
+                'message': 'Location logged successfully',
+                'data': serializer.data
+            }, status=status.HTTP_201_CREATED)
+
+        logger.warning("log_location: validation errors %s", serializer.errors)
         return Response({
-            'success': True,
-            'message': 'Location logged successfully',
-            'data': serializer.data
-        }, status=status.HTTP_201_CREATED)
-    
-    return Response({
-        'success': False,
-        'message': 'Failed to log location',
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+            'success': False,
+            'message': 'Failed to log location',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.exception("log_location: unexpected error")
+        return Response({
+            'success': False,
+            'message': str(e),
+            'errors': {}
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['GET'])
@@ -88,67 +136,146 @@ def live_locations(request):
         }
     }
     """
-    # Get locations from last 15 minutes
-    since = timezone.now() - timedelta(minutes=15)
-    
-    # Get latest location for each employee
-    latest_timestamps = LocationLog.objects.filter(
-        timestamp__gte=since
-    ).values('employee').annotate(
-        latest=Max('timestamp')
-    )
-    
-    # Fetch the actual location records
-    locations = []
-    for item in latest_timestamps:
-        location = LocationLog.objects.filter(
-            employee=item['employee'],
-            timestamp=item['latest']
-        ).select_related('employee').first()
-        
-        if location and location.employee.is_active:
-            locations.append({
-                'employee_id': str(location.employee.id),
-                'employee_name': location.employee.name,
-                'employee_code': location.employee.employee_id,
-                'department': location.employee.department,
-                'designation': location.employee.designation,
-                'latitude': location.latitude,
-                'longitude': location.longitude,
-                'accuracy': location.accuracy,
-                'battery_level': location.battery_level,
-                'speed': location.speed,
-                'address': location.address,
-                'timestamp': location.timestamp,
-                'minutes_ago': int((timezone.now() - location.timestamp).total_seconds() / 60)
+    try:
+        # Get locations from last 15 minutes
+        cutoff_time = timezone.now() - timedelta(minutes=15)
+        latest_timestamps = LocationLog.objects.filter(
+            timestamp__gte=cutoff_time
+        ).values('employee').annotate(
+            latest_time=Max('timestamp')
+        )
+
+        # Fetch the actual location records
+        locations = []
+        for item in latest_timestamps:
+            location = LocationLog.objects.filter(
+                employee_id=item['employee'],
+                timestamp=item['latest_time']
+            ).select_related('employee').first()
+
+            if location and location.employee.is_active:
+                ts = location.timestamp
+                ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+                locations.append({
+                    'employee_id': str(location.employee.id),
+                    'employee_name': location.employee.name,
+                    'employee_code': location.employee.employee_id,
+                    'department': location.employee.department,
+                    'designation': location.employee.designation,
+                    'latitude': location.latitude,
+                    'longitude': location.longitude,
+                    'accuracy': location.accuracy,
+                    'battery_level': location.battery_level,
+                    'speed': location.speed,
+                    'address': location.address or '',
+                    'timestamp': ts_iso,
+                    'last_update': _get_time_ago(location.timestamp),
+                    'minutes_ago': int((timezone.now() - location.timestamp).total_seconds() / 60),
+                })
+
+        # Format for Leaflet.js/OpenStreetMap (and flat-list consumers)
+        formatted_locations = []
+        for loc in locations:
+            formatted_locations.append({
+                'employee_id': loc['employee_id'],
+                'employee_name': loc['employee_name'],
+                'employee_code': loc.get('employee_code', ''),
+                'location': {
+                    'lat': loc['latitude'],
+                    'lng': loc['longitude']
+                },
+                'latitude': loc['latitude'],
+                'longitude': loc['longitude'],
+                'timestamp': loc['timestamp'],
+                'last_update': loc['last_update'],
+                'accuracy': loc.get('accuracy'),
+                'battery_level': loc.get('battery_level'),
+                'speed': loc.get('speed'),
+                'address': loc.get('address', ''),
             })
-    
-    # Format for Leaflet.js/OpenStreetMap
-    formatted_locations = []
-    for loc in locations:
-        formatted_locations.append({
-            'employee_id': loc['employee_id'],
-            'employee_name': loc['employee_name'],
-            'employee_code': loc.get('employee_code', ''),
-            'location': {
-                'lat': loc['latitude'],
-                'lng': loc['longitude']
-            },
-            'timestamp': loc['timestamp'].isoformat() if hasattr(loc['timestamp'], 'isoformat') else str(loc['timestamp']),
-            'accuracy': loc.get('accuracy'),
-            'battery_level': loc.get('battery_level'),
-            'speed': loc.get('speed'),
-            'address': loc.get('address', ''),
+
+        return Response({
+            'success': True,
+            'data': {
+                'locations': formatted_locations,
+                'count': len(formatted_locations),
+                'last_updated': timezone.now().isoformat(),
+                'time_window_minutes': 15
+            }
         })
-    
+    except Exception as e:
+        logger.exception('live_locations: unexpected error')
+        return Response({
+            'status': 'error',
+            'message': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def latest_location(request):
+    """
+    Get latest location for one employee by email (admin only).
+    GET /api/tracking/latest-location/?email=ashraf.anam@gel.com.bd
+
+    Returns same shape as one entry in live-locations. 404 if employee not found
+    or no location logged yet.
+    """
+    from employees.models import Employee
+
+    email = (request.query_params.get('email') or '').strip()
+    if not email:
+        return Response({
+            'success': False,
+            'message': 'Query parameter "email" is required.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        employee = Employee.objects.get(email=email)
+    except Employee.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': f'No employee with email "{email}".',
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    location = (
+        LocationLog.objects.filter(employee=employee)
+        .order_by('-timestamp')
+        .select_related('employee')
+        .first()
+    )
+    if not location:
+        return Response({
+            'success': False,
+            'message': f'No location logged yet for {employee.email} ({employee.employee_id} - {employee.name}).',
+        }, status=status.HTTP_404_NOT_FOUND)
+
+    ts = location.timestamp
+    ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+    data = {
+        'employee_id': str(employee.id),
+        'employee_name': employee.name,
+        'employee_code': employee.employee_id,
+        'employee_email': employee.email,
+        'department': employee.department,
+        'designation': employee.designation,
+        'location': {
+            'lat': location.latitude,
+            'lng': location.longitude
+        },
+        'latitude': location.latitude,
+        'longitude': location.longitude,
+        'timestamp': ts_iso,
+        'last_update': _get_time_ago(location.timestamp),
+        'minutes_ago': int((timezone.now() - location.timestamp).total_seconds() / 60),
+        'accuracy': location.accuracy,
+        'battery_level': location.battery_level,
+        'speed': location.speed,
+        'address': location.address or '',
+    }
     return Response({
         'success': True,
-        'data': {
-            'locations': formatted_locations,
-            'count': len(formatted_locations),
-            'last_updated': timezone.now(),
-            'time_window_minutes': 15
-        }
+        'data': data,
     })
 
 
@@ -290,19 +417,38 @@ def my_route_today(request):
     Get employee's own today's route
     GET /api/tracking/my-route-today/
     
-    Returns current employee's location logs for today with route calculation
+    Returns current employee's location logs for today with route calculation.
+    Requires employee JWT (request.user must be Employee).
     """
-    today = timezone.now().date()
+    from employees.models import Employee
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({
+            'success': False,
+            'message': 'Not an employee. Use employee JWT.',
+        }, status=status.HTTP_403_FORBIDDEN)
+    # #region agent log
+    try:
+        _lp = os.environ.get('DEBUG_LOG_PATH', r'e:\Attendance System\.cursor\debug.log')
+        with open(_lp, 'a') as _f:
+            _f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'H2', 'location': 'tracking/views.py:my_route_today', 'message': 'my_route_today_request', 'data': {'employee_id': str(employee.id), 'email': getattr(employee, 'email', None)}, 'timestamp': __import__('time').time() * 1000}) + '\n')
+    except Exception:
+        pass
+    # #endregion
+    today = timezone.localdate()
     start_datetime = timezone.make_aware(datetime.combine(today, time.min))
     end_datetime = timezone.make_aware(datetime.combine(today, time.max))
-    
-    # Get route history for current user
     route_data = RouteHistorySerializer.get_route_history(
-        employee_id=str(request.user.id),
+        employee_id=str(employee.id),
         start_datetime=start_datetime,
         end_datetime=end_datetime
     )
-    
+    if route_data is None:
+        return Response({
+            'success': False,
+            'message': 'Employee not found.',
+        }, status=status.HTTP_404_NOT_FOUND)
     return Response({
         'success': True,
         'data': route_data
@@ -389,7 +535,10 @@ class LocationLogViewSet(viewsets.ReadOnlyModelViewSet):
 @login_required
 def dashboard_home(request):
     """
-    Main dashboard page
+    Main dashboard page. Stats from LocationLog (real-time):
+    - Present = employees who logged location in last 15 minutes
+    - Late = of those present, first location today after 9:30 AM
+    - Absent = total_employees - present_count
     Template: dashboard/index.html
     """
     from employees.models import Employee
@@ -397,20 +546,43 @@ def dashboard_home(request):
 
     today = timezone.localdate()
 
+    # Total active employees
     total_employees = Employee.objects.filter(is_active=True).count()
-    todays_qs = Attendance.objects.filter(date=today).select_related('employee')
 
-    present_count = todays_qs.filter(status='PRESENT').count()
-    late_count = todays_qs.filter(status='LATE').count()
-    half_day_count = todays_qs.filter(status='HALF_DAY').count()
-    absent_count = max(total_employees - (present_count + late_count + half_day_count), 0)
+    # Present today = who logged at least one location today (distinct employees)
+    present_employee_ids = list(
+        LocationLog.objects.filter(timestamp__date=today)
+        .values_list('employee_id', flat=True)
+        .distinct()
+    )
+    present_count = len(present_employee_ids)
 
-    # Recent activities - use Attendance records instead of LocationLog
-    recent_activities = todays_qs.order_by('-created_at')[:10]
+    # Absent = everyone else
+    absent_count = max(total_employees - present_count, 0)
 
-    # Calculate attendance percentage
-    attendance_percentage = ((present_count + late_count + half_day_count) / total_employees * 100) if total_employees > 0 else 0
-    
+    # Late = present employees whose first location today was after 9:30 AM
+    late_count = 0
+    for emp_id in present_employee_ids:
+        first_log = LocationLog.objects.filter(
+            employee_id=emp_id,
+            timestamp__date=today,
+        ).order_by('timestamp').first()
+        if first_log and first_log.timestamp.time() > time(9, 30):
+            late_count += 1
+
+    # Half day not derived from location window; use 0 or keep from Attendance if desired
+    half_day_count = 0
+
+    # Attendance percentage (present vs total)
+    attendance_percentage = (
+        (present_count / total_employees * 100) if total_employees > 0 else 0
+    )
+
+    # Recent activities: today's Attendance records when available (e.g. after daily task)
+    recent_activities = Attendance.objects.filter(
+        date=today
+    ).select_related('employee').order_by('-created_at')[:10]
+
     context = {
         'today': today,
         'stats': {
@@ -431,10 +603,10 @@ def live_tracking_view(request):
     """
     Real-time tracking page (OpenStreetMap + Leaflet)
     Template: dashboard/live_tracking.html
-    JavaScript polls live locations every 30 seconds.
+    JavaScript polls live locations every 10 seconds for snappier updates during duty.
     """
     context = {
-        'poll_interval_ms': 30000,
+        'poll_interval_ms': 10000,
     }
     return render(request, 'dashboard/live_tracking.html', context)
 

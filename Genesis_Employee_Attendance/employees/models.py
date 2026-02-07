@@ -1,15 +1,25 @@
 import uuid
 from django.db import models
+from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
 
 
 class Employee(models.Model):
     """
-    Employee model for Genesis Employee Attendance System
+    Employee model for Genesis Employee Attendance System.
+    Optional OneToOne link to Django User for dashboard/session auth.
+    API JWT auth still uses Employee (EmployeeJWTAuthentication).
     """
     # Primary key as UUID
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    
+    # Optional link to Django User (for dashboard login, session auth)
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='employee',
+        null=True,
+        blank=True,
+    )
     # Basic Information
     employee_id = models.CharField(max_length=50, unique=True, db_index=True)
     name = models.CharField(max_length=200)

@@ -109,6 +109,22 @@ celery -A config beat -l info                 # Terminal 3
 | [DASHBOARD_DOCUMENTATION.md](DASHBOARD_DOCUMENTATION.md) | Dashboard features guide |
 | [CELERY_TASKS_DOCUMENTATION.md](CELERY_TASKS_DOCUMENTATION.md) | Automated tasks documentation |
 | [COMPLETE_PROJECT_SUMMARY.md](COMPLETE_PROJECT_SUMMARY.md) | Full project overview |
+| **[docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** | **Production deployment** (VPS, Docker, Nginx, SSL) |
+
+---
+
+## 🚀 Deployment (Production)
+
+For production on a VPS (DigitalOcean, AWS, etc.) with Docker, Nginx, and SSL:
+
+```bash
+cp env.example .env
+# Edit .env: SECRET_KEY, DB_PASSWORD, ALLOWED_HOSTS, CORS_ALLOWED_ORIGINS, DEBUG=False
+docker compose -f docker-compose.deploy.yml up -d --build
+docker compose -f docker-compose.deploy.yml exec web python manage.py createsuperuser
+```
+
+See **[docs/DEPLOYMENT_GUIDE.md](docs/DEPLOYMENT_GUIDE.md)** for full steps: VPS setup, Docker install, SSL (Let's Encrypt), and domain configuration.
 
 ---
 

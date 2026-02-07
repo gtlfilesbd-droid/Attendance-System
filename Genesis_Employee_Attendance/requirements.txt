@@ -11,3 +11,4 @@ python-decouple
 django-filter
 Pillow
 gunicorn
+dj-database-url>=2.0

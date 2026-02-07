@@ -1,3 +1,5 @@
+import json
+import os
 from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
@@ -10,6 +12,8 @@ from .models import Employee
 from .serializers import (
     EmployeeSerializer, EmployeeLoginSerializer, EmployeeProfileSerializer
 )
+import logging
+logger = logging.getLogger('employees.views')
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -30,6 +34,27 @@ class IsAdminOrReadOnly(IsAuthenticated):
         )
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def employee_me(request):
+    """
+    Get current employee profile (JWT auth).
+    GET /api/employees/me/
+    Used by the app; router exposes me at /api/employees/employees/me/, this path is /api/employees/me/.
+    """
+    user = request.user
+    if not isinstance(user, Employee):
+        return Response(
+            {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    serializer = EmployeeProfileSerializer(user)
+    return Response({
+        'success': True,
+        'data': serializer.data,
+    })
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def employee_login(request):
@@ -45,11 +70,26 @@ def employee_login(request):
     
     Returns JWT access and refresh tokens
     """
+    # #region agent log – login attempt visibility
+    client_ip = request.META.get('REMOTE_ADDR', '')
+    req_email = (request.data or {}).get('email', '') or '(no email)'
+    logger.info(
+        "employee_login: request from client_ip=%s email=%s path=%s",
+        client_ip, req_email, request.path,
+    )
+    # #endregion
     serializer = EmployeeLoginSerializer(data=request.data)
     
     if serializer.is_valid():
         employee = serializer.validated_data['employee']
-        
+        # #region agent log
+        try:
+            _lp = os.environ.get('DEBUG_LOG_PATH', r'e:\Attendance System\.cursor\debug.log')
+            with open(_lp, 'a') as _f:
+                _f.write(json.dumps({'sessionId': 'debug-session', 'runId': 'run1', 'hypothesisId': 'H2', 'location': 'employees/views.py:employee_login', 'message': 'login_success', 'data': {'employee_id': str(employee.id), 'email': employee.email}, 'timestamp': __import__('time').time() * 1000}) + '\n')
+        except Exception:
+            pass
+        # #endregion
         # Generate JWT tokens
         refresh = RefreshToken.for_user(employee)
         
@@ -63,6 +103,12 @@ def employee_login(request):
             }
         }, status=status.HTTP_200_OK)
     
+    # #region agent log – login failure reason
+    logger.warning(
+        "employee_login: failed client_ip=%s email=%s errors=%s",
+        request.META.get('REMOTE_ADDR', ''), req_email, serializer.errors,
+    )
+    # #endregion
     return Response({
         'success': False,
         'message': 'Login failed',

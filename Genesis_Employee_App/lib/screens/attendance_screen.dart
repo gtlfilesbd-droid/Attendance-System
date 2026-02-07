@@ -50,16 +50,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         // If the backend `AttendanceViewSet` returns a list, then `data` is a list.
         // If it's paginated, it might be `{ "results": [...] }`.
         
-        // Let's safely handle if it's a list or map containing list.
-        if (result is List) {
-           _attendanceRecords = result;
-        } else if (result.containsKey('results')) {
-           _attendanceRecords = result['results'];
+        // API returns Map with 'results', 'records', or list in 'data'.
+        if (result.containsKey('results')) {
+          _attendanceRecords = List<dynamic>.from(result['results'] ?? []);
         } else if (result.containsKey('records')) {
-           _attendanceRecords = result['records'];
+          _attendanceRecords = List<dynamic>.from(result['records'] ?? []);
+        } else if (result.containsKey('data') && result['data'] is List) {
+          _attendanceRecords = List<dynamic>.from(result['data'] as List);
         } else {
-           // Fallback or empty
-           _attendanceRecords = [];
+          _attendanceRecords = [];
         }
       });
     }

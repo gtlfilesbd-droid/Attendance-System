@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
+    'django_filters',
     'django_celery_beat',
     
     # Local apps
@@ -81,16 +82,25 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': config('DB_NAME', default='genesis_attendance_db'),
-        'USER': config('DB_USER', default='postgres'),
-        'PASSWORD': config('DB_PASSWORD', default=''),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='5432'),
+_db_url = config('DATABASE_URL', default='')
+if _db_url:
+    import dj_database_url
+    DATABASES = {
+        'default': dj_database_url.parse(_db_url, conn_max_age=600, conn_health_checks=True),
     }
-}
+    # Ensure PostGIS engine when using DATABASE_URL
+    DATABASES['default']['ENGINE'] = 'django.contrib.gis.db.backends.postgis'
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.contrib.gis.db.backends.postgis',
+            'NAME': config('DB_NAME', default='genesis_attendance_db'),
+            'USER': config('DB_USER', default='postgres'),
+            'PASSWORD': config('DB_PASSWORD', default=''),
+            'HOST': config('DB_HOST', default='localhost'),
+            'PORT': config('DB_PORT', default='5432'),
+        }
+    }
 
 
 # Password validation
@@ -117,7 +127,7 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = config('TIME_ZONE', default='Asia/Dhaka')
 
 USE_I18N = True
 
@@ -146,6 +156,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # REST Framework Configuration
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
+        'employees.authentication.EmployeeJWTAuthentication',  # Employee JWT (app) first
         'rest_framework_simplejwt.authentication.JWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',  # For web dashboard
     ),
@@ -194,8 +205,15 @@ SIMPLE_JWT = {
 }
 
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:3000,http://localhost:8080', cast=Csv())
+# CORS Configuration (for web dashboard and mobile app API calls)
+# When CORS_ALLOW_ALL_ORIGINS is True, CORS_ALLOWED_ORIGINS is ignored.
+CORS_ALLOW_ALL_ORIGINS = config('CORS_ALLOW_ALL_ORIGINS', default=DEBUG, cast=bool)  # True only in dev; set False in production!
+
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    default='http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://127.0.0.1:8080,http://192.168.68.53:8000',
+    cast=Csv(),
+)
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -219,6 +237,9 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
 ]
+
+# Optional: Google Maps API key (for any map widgets or geocoding)
+GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
 
 
 # Celery Configuration
@@ -312,7 +333,7 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
-# Logging Configuration
+# Logging Configuration (detailed flow for tracking and auth)
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -336,10 +357,15 @@ LOGGING = {
             'filename': BASE_DIR / 'logs' / 'django.log',
             'formatter': 'verbose',
         },
+        'debug_file': {
+            'class': 'logging.FileHandler',
+            'filename': BASE_DIR / 'debug.log',
+            'formatter': 'verbose',
+        },
     },
     'root': {
         'handlers': ['console', 'file'],
-        'level': 'INFO',
+        'level': 'DEBUG',
     },
     'loggers': {
         'django': {
@@ -349,12 +375,27 @@ LOGGING = {
         },
         'employees': {
             'handlers': ['console', 'file'],
-            'level': 'INFO',
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'employees.views': {
+            'handlers': ['console', 'file', 'debug_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'employees.authentication': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
             'propagate': False,
         },
         'tracking': {
-            'handlers': ['console', 'file'],
-            'level': 'INFO',
+            'handlers': ['console', 'file', 'debug_file'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'tracking.views': {
+            'handlers': ['console', 'file', 'debug_file'],
+            'level': 'DEBUG',
             'propagate': False,
         },
         'attendance': {

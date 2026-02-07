@@ -142,7 +142,8 @@
 <script>
     let mapTracker;
     let countdownInterval;
-    let countdown = 30;
+    const pollIntervalSeconds = {{ poll_interval_ms }} / 1000;
+    let countdown = pollIntervalSeconds;
     
     // Initialize Leaflet Map
     async function initMap() {
@@ -160,7 +161,7 @@
             await refreshLocations();
             
             // Set up auto-refresh
-            mapTracker.startAutoRefresh(30000, (locations) => {
+            mapTracker.startAutoRefresh({{ poll_interval_ms }}, (locations) => {
                 updateEmployeeList(locations);
                 updateLastUpdateTime();
             });
@@ -261,15 +262,15 @@
         document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
     }
     
-    // Start countdown timer
+    // Start countdown timer (matches poll interval)
     function startCountdown() {
-        countdown = 30;
+        countdown = pollIntervalSeconds;
         countdownInterval = setInterval(() => {
             countdown--;
             const timerEl = document.getElementById('refreshTimer');
             if (timerEl) timerEl.textContent = countdown + 's';
             if (countdown <= 0) {
-                countdown = 30;
+                countdown = pollIntervalSeconds;
             }
         }, 1000);
     }

@@ -8,6 +8,8 @@ from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
 from datetime import datetime, timedelta
 from .models import Attendance
+from employees.models import Employee
+from tracking.models import LocationLog
 from .serializers import (
     AttendanceSerializer, AttendanceReportSerializer, DailyAttendanceSummarySerializer
 )
@@ -18,6 +20,39 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 50
     page_size_query_param = 'page_size'
     max_page_size = 200
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def clear_my_data(request):
+    """
+    Delete all attendance and location data for the current (logged-in) employee.
+    POST /api/attendance/clear-my-data/ or DELETE /api/attendance/clear-my-data/
+    Requires employee JWT. Returns deleted counts.
+    """
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({
+            'success': False,
+            'message': 'Not an employee. Use employee JWT or link your user to an employee.',
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    att_qs = Attendance.objects.filter(employee=employee)
+    loc_qs = LocationLog.objects.filter(employee=employee)
+    att_count = att_qs.count()
+    loc_count = loc_qs.count()
+    att_qs.delete()
+    loc_qs.delete()
+
+    return Response({
+        'success': True,
+        'message': 'Your attendance and location data have been deleted.',
+        'data': {
+            'attendance_deleted': att_count,
+            'location_logs_deleted': loc_count,
+        },
+    }, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -61,10 +96,19 @@ def my_attendance(request):
             }, status=status.HTTP_400_BAD_REQUEST)
     else:
         end_date = timezone.now().date()
+
+    # Resolve Employee: JWT auth gives Employee; session auth gives User with .employee
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({
+            'success': False,
+            'message': 'Not an employee. Use employee JWT or link your user to an employee.',
+        }, status=status.HTTP_403_FORBIDDEN)
     
     # Build query
     queryset = Attendance.objects.filter(
-        employee=request.user,
+        employee=employee,
         date__gte=start_date,
         date__lte=end_date
     )

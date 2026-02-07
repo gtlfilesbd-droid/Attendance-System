@@ -7,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../config/app_config.dart';
+import '../utils/working_hours.dart' as wh;
+import 'auth_service.dart';
 import 'api_service.dart';
 import 'background_worker.dart';
 
@@ -59,19 +61,14 @@ class LocationService {
     }
   }
 
-  /// Check if current time is within 9:30 AM - 6:30 PM (Instance method)
+  /// Time limit disabled: always allows tracking when duty is active (Instance method)
   bool isWorkingHours() {
     return isWorkingHoursStatic();
   }
 
-  /// Check if current time is within 9:30 AM - 6:30 PM (Static method)
-  static bool isWorkingHoursStatic() {
-    final now = DateTime.now();
-    final startWork = DateTime(now.year, now.month, now.day, 9, 30);
-    final endWork = DateTime(now.year, now.month, now.day, 18, 30);
-
-    return now.isAfter(startWork) && now.isBefore(endWork);
-  }
+  /// Time limit disabled: always allows tracking when duty is active (Static method).
+  /// [now] is optional for testing; defaults to DateTime.now().
+  static bool isWorkingHoursStatic([DateTime? now]) => wh.isWorkingHours(now);
 
   /// Schedule periodic checks using WorkManager
   void scheduleTracking() {
@@ -86,11 +83,8 @@ class LocationService {
     print("LocationService: Scheduled periodic tracking check");
   }
 
-  /// Start Tracking Manually
+  /// Start Tracking Manually (Start duty) - runs until user presses End duty
   Future<void> startTracking() async {
-    if (!isWorkingHours()) {
-      print("LocationService: Starting tracking (User initiated outside hours)");
-    }
     await BackgroundWorker().startService();
   }
 
@@ -100,39 +94,66 @@ class LocationService {
   }
 
   static Future<void> sendLocationToBackend(
-    Position position, 
-    Battery battery
+    Position position,
+    Battery battery,
   ) async {
     try {
-      // Get battery level
-      int batteryLevel = await battery.batteryLevel;
-      
-      print('FLUTTER_BG_SERVICE: Sending Location ${position.latitude}, ${position.longitude}');
+      final batteryLevel = await battery.batteryLevel;
+      final timestamp = DateTime.now().toIso8601String();
 
-      // Use ApiService to send data
-      final success = await ApiService().logLocation(
-        latitude: position.latitude, 
-        longitude: position.longitude, 
-        accuracy: position.accuracy, 
-        batteryLevel: batteryLevel,
-        speed: position.speed
-      );
-      
-      if (success) {
-        print('FLUTTER_BG_SERVICE: Sent to API');
-      } else {
-        print('FLUTTER_BG_SERVICE: API failed. Saving offline.');
+      // Detailed logging: auth and config
+      final token = await AuthService().getToken();
+      if (token == null || token.isEmpty) {
+        print('FLUTTER_BG_SERVICE: ERROR No auth token found - cannot send location');
         await _saveOffline({
           'latitude': position.latitude,
           'longitude': position.longitude,
-          'timestamp': DateTime.now().toIso8601String(),
+          'timestamp': timestamp,
+          'accuracy': position.accuracy,
+          'speed': position.speed,
+          'battery_level': batteryLevel,
+        });
+        return;
+      }
+      print('FLUTTER_BG_SERVICE: Token present (length=${token.length})');
+
+      print(
+        'FLUTTER_BG_SERVICE: Sending location lat=${position.latitude}, lng=${position.longitude}, '
+        'accuracy=${position.accuracy}, battery=$batteryLevel, timestamp=$timestamp',
+      );
+
+      final success = await ApiService().logLocation(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+        batteryLevel: batteryLevel,
+        speed: position.speed,
+      );
+
+      if (success) {
+        print('FLUTTER_BG_SERVICE: Location sent successfully to API');
+      } else {
+        print('FLUTTER_BG_SERVICE: API returned failure (no 200/201). Saving offline.');
+        await _saveOffline({
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'timestamp': timestamp,
           'accuracy': position.accuracy,
           'speed': position.speed,
           'battery_level': batteryLevel,
         });
       }
-    } catch (e) {
-      print('FLUTTER_BG_SERVICE: Logic Error $e');
+    } catch (e, stackTrace) {
+      print('FLUTTER_BG_SERVICE: ERROR sending location: $e');
+      print('FLUTTER_BG_SERVICE: Stack trace: $stackTrace');
+      await _saveOffline({
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'timestamp': DateTime.now().toIso8601String(),
+        'accuracy': position.accuracy,
+        'speed': position.speed,
+        'battery_level': await battery.batteryLevel,
+      });
     }
   }
 

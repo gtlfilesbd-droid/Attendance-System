@@ -68,11 +68,37 @@ docker compose up -d
 docker compose restart web
 ```
 
-## ⚠️ Important Notes
+## Present Today and Dashboard Data
+
+- **"Present today"** and recent activities on the dashboard are filled by the **Celery task** `tracking.calculate_daily_attendance`, which runs **daily at 6:45 PM**. Until it runs (or you run it manually), today's Attendance table is empty and "Present today" shows 0.
+- **For testing:** Run the attendance calculation for today immediately:
+  ```bash
+  docker compose exec web python manage.py run_attendance_today
+  ```
+  (Or without Docker: `python manage.py run_attendance_today`.) After this, the dashboard will show "Present today" and recent activities for today.
+
+## Dashboard not showing locations / Present count 0 (debugging)
+
+1. **Check if locations are in the database:**
+   ```bash
+   docker compose exec web python manage.py check_locations
+   ```
+   - If **Total location logs: 0** and **Today's location logs: 0**: the mobile app is not saving data. Check backend logs for "Employee JWT auth" and "log_location", restart web (`docker compose restart web`), ensure employee exists (`docker compose exec web python create_admin.py`), and that the app baseUrl points to your server.
+   - If **counts are > 0**: locations are saved. Continue below.
+
+2. **Update Present count:** Run the attendance calculation so "Present today" and recent activities appear:
+   ```bash
+   docker compose exec web python manage.py run_attendance_today
+   ```
+   Then refresh the dashboard home page.
+
+3. **Live Tracking map:** The map shows employees who have at least one location in the **last 15 minutes**. Log in to the dashboard as **admin** (Django superuser), open **Live Tracking**, and click Refresh. If you have recent locations from step 1, they will appear.
+
+## Important Notes
 
 - **Change default passwords** after first login
-- Celery tasks run automatically (attendance calculation, reminders)
-- Location tracking requires employee to log locations via API
+- Celery tasks run automatically (attendance calculation at 6:45 PM, reminders)
+- Location tracking requires the app to log locations (Employee JWT must be accepted; see employees.authentication)
 - Dashboard shows real-time data from the database
 
 ## 📚 Documentation

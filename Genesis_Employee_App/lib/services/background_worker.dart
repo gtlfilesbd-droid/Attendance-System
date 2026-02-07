@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
+import '../config/app_config.dart';
 import 'location_service.dart';
 import 'api_service.dart';
 
@@ -34,6 +36,7 @@ void callbackDispatcher() {
   });
 }
 
+@pragma('vm:entry-point')
 class BackgroundWorker {
   static final BackgroundWorker _instance = BackgroundWorker._internal();
   
@@ -67,7 +70,7 @@ class BackgroundWorker {
     final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
         FlutterLocalNotificationsPlugin();
 
-    if (await service.isAndroid) {
+    if (Platform.isAndroid) {
       await flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
@@ -138,20 +141,8 @@ class BackgroundWorker {
       service.stopSelf();
     });
 
-    // Tracking Loop (Every 5 minutes)
-    Timer.periodic(const Duration(minutes: 5), (timer) async {
-      final isWorkingHours = LocationService.isWorkingHoursStatic();
-
-      if (!isWorkingHours) {
-        if (service is AndroidServiceInstance) {
-            service.setForegroundNotificationInfo(
-              title: "Genesis Tracking",
-              content: "Paused (Outside working hours)",
-            );
-        }
-        return; 
-      }
-
+    // Tracking Loop - every N seconds while duty is active (Start duty / End duty)
+    Timer.periodic(Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty), (timer) async {
       if (service is AndroidServiceInstance) {
         if (await service.isForegroundService()) {
           service.setForegroundNotificationInfo(

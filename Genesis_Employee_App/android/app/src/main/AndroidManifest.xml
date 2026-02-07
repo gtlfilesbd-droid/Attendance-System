@@ -1,7 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.genesis.employee_app">
     
-    <!-- Location Permissions -->
+    <!-- Permissions required for attendance tracking and Play Store compliance -->
+    <!-- Location: required for GPS-based attendance and route logging -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
@@ -29,9 +31,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
-        android:label="Genesis Employee"
+        android:label="Genesis"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:enableOnBackInvokedCallback="true">
         
         <activity
             android:name=".MainActivity"
@@ -55,7 +58,8 @@
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:foregroundServiceType="location"
-            android:exported="false" />
+            android:exported="false"
+            tools:replace="android:exported" />
         
         <meta-data
             android:name="flutterEmbedding"

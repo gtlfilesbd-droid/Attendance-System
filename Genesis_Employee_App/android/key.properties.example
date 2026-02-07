@@ -1,0 +1,9 @@
+# Copy this file to key.properties (in this android/ folder) and fill in your signing details.
+# Do not commit key.properties or your .jks/.keystore file.
+# See docs/BUILD_AND_RELEASE.md for how to create a keystore.
+# storeFile path is relative to android/app/ (e.g. put upload-keystore.jks in android/app/).
+
+storePassword=your-keystore-password
+keyPassword=your-key-password
+keyAlias=upload
+storeFile=upload-keystore.jks

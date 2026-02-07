@@ -46,13 +46,13 @@
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	
-	<!-- Location Permissions -->
+	<!-- Location Permissions (required for attendance tracking; App Store will show these) -->
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>This app needs access to your location to track your attendance and work hours.</string>
+	<string>Genesis Employee uses your location to record check-in/check-out and attendance while duty is active.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>This app needs access to your location in the background to continuously track your attendance and work hours.</string>
+	<string>Genesis Employee needs background location access to continuously track your attendance while duty is active.</string>
 	<key>NSLocationAlwaysUsageDescription</key>
-	<string>This app needs access to your location in the background to continuously track your attendance and work hours.</string>
+	<string>Genesis Employee needs background location access to continuously track your attendance while duty is active.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>location</string>
@@ -60,7 +60,7 @@
 		<string>processing</string>
 	</array>
 	
-	<!-- Internet Permission (for API calls) -->
+	<!-- App Transport Security: use HTTPS in production; localhost exception for dev -->
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

@@ -98,4 +98,47 @@ class AuthService {
     }
     return null;
   }
+
+  /// Get stored refresh token
+  Future<String?> getRefreshToken() async {
+    return await _storage.read(key: AppConfig.refreshTokenKey);
+  }
+
+  /// Refresh access token using refresh token
+  Future<bool> refreshToken() async {
+    try {
+      final refreshToken = await getRefreshToken();
+      if (refreshToken == null) {
+        return false;
+      }
+
+      // Initialize ApiService if not already
+      ApiService().initialize();
+      
+      final dio = ApiService().client;
+      final response = await dio.post(
+        AppConfig.tokenRefreshEndpoint,
+        data: {'refresh': refreshToken},
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data;
+        final access = data['access'];
+        
+        // Save new access token
+        if (access != null) {
+          await _storage.write(key: AppConfig.tokenKey, value: access);
+          // Refresh token might also be updated
+          if (data['refresh'] != null) {
+            await _storage.write(key: AppConfig.refreshTokenKey, value: data['refresh']);
+          }
+          return true;
+        }
+      }
+      return false;
+    } catch (e) {
+      print('Token refresh error: $e');
+      return false;
+    }
+  }
 }

@@ -54,9 +54,47 @@ class ApiService {
         
         // Handle 401 Unauthorized (Token expired)
         if (e.response?.statusCode == 401) {
-          // TODO: Implement token refresh logic here
-          // For now, we logout
-          await AuthService().logout();
+          try {
+            // Attempt to refresh the token
+            final authService = AuthService();
+            final refreshed = await authService.refreshToken();
+            
+            if (refreshed) {
+              // Retry the original request with new token
+              final newToken = await authService.getToken();
+              if (newToken != null) {
+                // Update the request options with new token
+                e.requestOptions.headers['Authorization'] = 'Bearer $newToken';
+                
+                // Retry the request
+                final opts = Options(
+                  method: e.requestOptions.method,
+                  headers: e.requestOptions.headers,
+                  contentType: e.requestOptions.contentType,
+                  responseType: e.requestOptions.responseType,
+                );
+                
+                try {
+                  final cloneReq = await _dio.request(
+                    e.requestOptions.path,
+                    options: opts,
+                    data: e.requestOptions.data,
+                    queryParameters: e.requestOptions.queryParameters,
+                  );
+                  return handler.resolve(cloneReq);
+                } catch (retryError) {
+                  // If retry also fails, proceed with error
+                  return handler.next(e);
+                }
+              }
+            }
+            
+            // If refresh failed, logout
+            await authService.logout();
+          } catch (refreshError) {
+            print('Token refresh failed: $refreshError');
+            await AuthService().logout();
+          }
         }
         return handler.next(e);
       },
@@ -105,6 +143,7 @@ class ApiService {
 
   /// Log Location
   /// POST /tracking/log-location/
+  /// Sends employee UUID when available so backend can associate the location.
   Future<bool> logLocation({
     required double latitude,
     required double longitude,
@@ -113,34 +152,69 @@ class ApiService {
     double? speed,
   }) async {
     try {
+      final employeeData = await AuthService().getEmployeeData();
+      final employeeId = employeeData?['id']?.toString();
+
+      final payload = <String, dynamic>{
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy,
+        'battery_level': batteryLevel,
+        'speed': speed,
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      if (employeeId != null && employeeId.isNotEmpty) {
+        payload['employee'] = employeeId;
+      }
+
+      print('API: logLocation POST ${AppConfig.baseUrl}${AppConfig.locationLogEndpoint} '
+          'employeeId=${employeeId ?? "null"}');
+      if (kDebugMode) {
+        print('API: logLocation payload: $payload');
+      }
+
       final response = await _dio.post(
         AppConfig.locationLogEndpoint,
-        data: {
-          'latitude': latitude,
-          'longitude': longitude,
-          'accuracy': accuracy,
-          'battery_level': batteryLevel,
-          'speed': speed,
-          'timestamp': DateTime.now().toIso8601String(),
-        },
+        data: payload,
       );
-      
-      return response.statusCode == 200 || response.statusCode == 201;
-    } catch (e) {
+
+      final ok = response.statusCode == 200 || response.statusCode == 201;
+      print('API: logLocation response status=${response.statusCode} success=$ok');
+      if (kDebugMode && response.data != null) {
+        print('API: logLocation response data: ${response.data}');
+      }
+      return ok;
+    } on DioException catch (e) {
+      print('API: logLocation DioException: ${e.type} ${e.message}');
+      print('API: logLocation response status: ${e.response?.statusCode}');
+      print('API: logLocation response data: ${e.response?.data}');
+      return false;
+    } catch (e, stackTrace) {
       print('API: logLocation error: $e');
+      print('API: logLocation stackTrace: $stackTrace');
       return false;
     }
   }
 
   /// Get My Route Today
   /// GET /tracking/my-route-today/
+  /// Backend returns { "data": { "locations": [...] } } (plain list) or GeoJSON FeatureCollection
   Future<List<dynamic>> getMyRouteToday() async {
     try {
       final response = await _dio.get('/tracking/my-route-today/');
       
       if (response.statusCode == 200 && response.data['success'] == true) {
-        // The backend returns { "data": { "locations": [...] } }
-        return response.data['data']['locations'] ?? [];
+        final data = response.data['data'];
+        if (data == null) return [];
+        final locations = data['locations'];
+        if (locations == null) return [];
+        // Plain list from backend
+        if (locations is List) return List<dynamic>.from(locations);
+        // GeoJSON FeatureCollection: use features array
+        if (locations is Map && locations['features'] is List) {
+          return List<dynamic>.from(locations['features'] as List);
+        }
+        return [];
       }
       return [];
     } catch (e) {
