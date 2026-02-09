@@ -22,6 +22,13 @@ DEBUG = config('DEBUG', default=True, cast=bool)
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
 
+# Required for admin/login when accessed via public IP or port-forward (Django 4.0+)
+CSRF_TRUSTED_ORIGINS = config(
+    'CSRF_TRUSTED_ORIGINS',
+    default='http://localhost:8000,http://127.0.0.1:8000,http://192.168.68.84:8000,http://103.29.60.233:8000',
+    cast=Csv(),
+)
+
 
 # Application definition
 

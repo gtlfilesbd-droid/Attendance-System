@@ -1,7 +1,7 @@
 class AppConfig {
-  // API Configuration - PC IP: 192.168.68.73 (Web PC where Django/Docker runs)
+  // API Configuration - PC IP: 103.29.60.233 (Web PC where Django/Docker runs)
   // Use 10.0.2.2 for Android Emulator, localhost for iOS Simulator
-  static const String baseUrl = 'http://192.168.68.73:8000/api';
+  static const String baseUrl = 'http://103.29.60.233:8000/api';
   
   // API Endpoints
   static const String loginEndpoint = '/employees/auth/login/';
