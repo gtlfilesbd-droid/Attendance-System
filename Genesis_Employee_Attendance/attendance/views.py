@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
@@ -7,7 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
 from datetime import datetime, timedelta
-from .models import Attendance
+from .models import Attendance, DutySession
 from employees.models import Employee
 from tracking.models import LocationLog
 from .serializers import (
@@ -39,9 +40,12 @@ def clear_my_data(request):
         }, status=status.HTTP_403_FORBIDDEN)
 
     att_qs = Attendance.objects.filter(employee=employee)
+    duty_qs = DutySession.objects.filter(employee=employee)
     loc_qs = LocationLog.objects.filter(employee=employee)
     att_count = att_qs.count()
+    duty_count = duty_qs.count()
     loc_count = loc_qs.count()
+    duty_qs.delete()
     att_qs.delete()
     loc_qs.delete()
 
@@ -50,7 +54,165 @@ def clear_my_data(request):
         'message': 'Your attendance and location data have been deleted.',
         'data': {
             'attendance_deleted': att_count,
+            'duty_sessions_deleted': duty_count,
             'location_logs_deleted': loc_count,
+        },
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def start_duty(request):
+    """
+    Start a duty session. Records start time and location.
+    POST /api/attendance/start-duty/
+    Body: latitude, longitude, optional address.
+    If employee has an open session, it is auto-closed with end_time=now and current location.
+    """
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({
+            'success': False,
+            'message': 'Not an employee. Use employee JWT or link your user to an employee.',
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    lat = request.data.get('latitude')
+    lon = request.data.get('longitude')
+    if lat is None or lon is None:
+        return Response({
+            'success': False,
+            'message': 'latitude and longitude are required.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return Response({
+            'success': False,
+            'message': 'latitude and longitude must be numbers.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+    address = request.data.get('address') or ''
+
+    now = timezone.now()
+    today = now.date()
+
+    # Auto-close any existing open session for this employee (end at current location)
+    open_sessions = DutySession.objects.filter(employee=employee, end_time__isnull=True)
+    for sess in open_sessions:
+        sess.end_time = now
+        sess.end_latitude = lat
+        sess.end_longitude = lon
+        sess.end_address = address
+        delta = sess.end_time - sess.start_time
+        sess.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+        sess.save()
+        # Update Attendance for that session's date
+        _update_attendance_for_date(employee, sess.date)
+
+    session = DutySession.objects.create(
+        employee=employee,
+        date=today,
+        start_time=now,
+        start_latitude=lat,
+        start_longitude=lon,
+        start_address=address or None,
+        end_time=None,
+        total_hours=Decimal('0.00'),
+    )
+    return Response({
+        'success': True,
+        'data': {
+            'session_id': session.id,
+            'start_time': session.start_time.isoformat(),
+            'date': today.isoformat(),
+        },
+    }, status=status.HTTP_201_CREATED)
+
+
+def _update_attendance_for_date(employee, date):
+    """Set Attendance.total_hours for employee+date to sum of all closed DutySessions for that date."""
+    total = DutySession.objects.filter(
+        employee=employee,
+        date=date,
+        end_time__isnull=False,
+    ).aggregate(s=Sum('total_hours'))['s'] or Decimal('0.00')
+    first_session = DutySession.objects.filter(employee=employee, date=date).order_by('start_time').first()
+    last_session = DutySession.objects.filter(employee=employee, date=date).order_by('-start_time').first()
+    first_time = first_session.start_time.time() if first_session else None
+    last_time = (last_session.end_time.time() if last_session and last_session.end_time else
+                 last_session.start_time.time() if last_session else None)
+    Attendance.objects.update_or_create(
+        employee=employee,
+        date=date,
+        defaults={
+            'total_hours': total,
+            'first_location_time': first_time,
+            'last_location_time': last_time,
+            'check_in_time': first_time,
+            'check_out_time': last_time,
+            'status': 'PRESENT',
+        },
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def end_duty(request):
+    """
+    End the current duty session. Records end time and location.
+    POST /api/attendance/end-duty/
+    Body: latitude, longitude, optional address.
+    """
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({
+            'success': False,
+            'message': 'Not an employee. Use employee JWT or link your user to an employee.',
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    lat = request.data.get('latitude')
+    lon = request.data.get('longitude')
+    if lat is None or lon is None:
+        return Response({
+            'success': False,
+            'message': 'latitude and longitude are required.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (TypeError, ValueError):
+        return Response({
+            'success': False,
+            'message': 'latitude and longitude must be numbers.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+    address = request.data.get('address') or ''
+
+    session = DutySession.objects.filter(employee=employee, end_time__isnull=True).order_by('-start_time').first()
+    if not session:
+        return Response({
+            'success': False,
+            'message': 'No open duty session. Start duty first.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    now = timezone.now()
+    session.end_time = now
+    session.end_latitude = lat
+    session.end_longitude = lon
+    session.end_address = address or None
+    delta = session.end_time - session.start_time
+    session.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+    session.save()
+
+    _update_attendance_for_date(employee, session.date)
+
+    return Response({
+        'success': True,
+        'data': {
+            'session_id': session.id,
+            'end_time': session.end_time.isoformat(),
+            'total_hours': float(session.total_hours),
         },
     }, status=status.HTTP_200_OK)
 
@@ -106,42 +268,69 @@ def my_attendance(request):
             'message': 'Not an employee. Use employee JWT or link your user to an employee.',
         }, status=status.HTTP_403_FORBIDDEN)
     
-    # Build query
-    queryset = Attendance.objects.filter(
+    # Duty sessions in range (closed sessions only for per-date total; include open for display)
+    sessions_qs = DutySession.objects.filter(
+        employee=employee,
+        date__gte=start_date,
+        date__lte=end_date
+    ).order_by('-date', '-start_time')
+
+    # Build by_date: group by date, each with sessions list and total_hours
+    from collections import defaultdict
+    by_date_map = defaultdict(list)
+    for sess in sessions_qs:
+        start_location = sess.start_address or f"{sess.start_latitude}, {sess.start_longitude}"
+        end_location = (
+            (sess.end_address or f"{sess.end_latitude}, {sess.end_longitude}")
+            if sess.end_time else None
+        )
+        by_date_map[sess.date].append({
+            'start_time': sess.start_time.isoformat(),
+            'start_location': start_location,
+            'end_time': sess.end_time.isoformat() if sess.end_time else None,
+            'end_location': end_location,
+            'total_hours': float(sess.total_hours),
+        })
+
+    by_date = []
+    total_hours_overall = Decimal('0.00')
+    for date in sorted(by_date_map.keys(), reverse=True):
+        # Sessions in chronological order (oldest first) per date
+        sessions_list = sorted(by_date_map[date], key=lambda s: s['start_time'] or '')
+        date_total = sum(Decimal(str(s['total_hours'])) for s in sessions_list)
+        total_hours_overall += date_total
+        by_date.append({
+            'date': date.isoformat(),
+            'sessions': sessions_list,
+            'total_hours': float(date_total),
+        })
+
+    # Summary (for compatibility and stats)
+    att_queryset = Attendance.objects.filter(
         employee=employee,
         date__gte=start_date,
         date__lte=end_date
     )
-    
-    # Apply status filter
     if status_filter:
-        queryset = queryset.filter(status=status_filter)
-    
-    # Order by date descending
-    queryset = queryset.order_by('-date')
-    
-    # Serialize
-    serializer = AttendanceSerializer(queryset, many=True)
-    
-    # Calculate summary statistics
+        att_queryset = att_queryset.filter(status=status_filter)
     summary = {
-        'total_days': queryset.count(),
-        'present_count': queryset.filter(status='PRESENT').count(),
-        'late_count': queryset.filter(status='LATE').count(),
-        'half_day_count': queryset.filter(status='HALF_DAY').count(),
-        'absent_count': queryset.filter(status='ABSENT').count(),
-        'total_hours': float(queryset.aggregate(Sum('total_hours'))['total_hours__sum'] or 0),
-        'average_hours': float(queryset.aggregate(Avg('total_hours'))['total_hours__avg'] or 0),
+        'total_days': len(by_date),
+        'present_count': att_queryset.filter(status='PRESENT').count(),
+        'late_count': att_queryset.filter(status='LATE').count(),
+        'half_day_count': att_queryset.filter(status='HALF_DAY').count(),
+        'absent_count': att_queryset.filter(status='ABSENT').count(),
+        'total_hours': float(total_hours_overall),
+        'average_hours': float(total_hours_overall / len(by_date)) if by_date else 0,
     }
-    
+
     return Response({
         'success': True,
         'data': {
-            'records': serializer.data,
+            'by_date': by_date,
             'summary': summary,
             'date_range': {
-                'start_date': start_date,
-                'end_date': end_date
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat()
             }
         }
     })

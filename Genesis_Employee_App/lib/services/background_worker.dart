@@ -11,20 +11,18 @@ import '../config/app_config.dart';
 import 'location_service.dart';
 import 'api_service.dart';
 
-// Top-level function for WorkManager
+// Top-level function for WorkManager.
+// WorkManager is only allowed to stop or clean up; it must NEVER start the tracking service.
+// Tracking lifecycle is fully controlled by Start Duty / End Duty (user action only).
 @pragma('vm:entry-point')
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     print("WORKMANAGER: Task $task started");
     
     if (task == 'check_tracking_schedule') {
-      if (LocationService.isWorkingHoursStatic()) {
-        final service = FlutterBackgroundService();
-        if (!await service.isRunning()) {
-           print("WORKMANAGER: Starting background service");
-           await service.startService();
-        }
-      } else {
+      // Only stop the service when outside working hours (for when real hours are enabled).
+      // Never start the service here.
+      if (!LocationService.isWorkingHoursStatic()) {
         final service = FlutterBackgroundService();
         if (await service.isRunning()) {
            print("WORKMANAGER: Stopping background service (outside hours)");

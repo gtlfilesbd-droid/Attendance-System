@@ -22,8 +22,8 @@ void main() {
               w is Text &&
               (w.data == 'Sign in to start tracking' ||
                   w.data == 'Genesis Employee' ||
-                  w.data == 'Tracking Stopped' ||
-                  w.data == 'Tracking Active' ||
+                  w.data == 'Offline' ||
+                  w.data == 'Online' ||
                   w.data == 'Hello, '),
         ),
         findsAtLeastNWidgets(1),

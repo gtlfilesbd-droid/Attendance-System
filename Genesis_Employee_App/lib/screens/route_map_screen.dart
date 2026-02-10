@@ -29,6 +29,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     setState(() {
       _isLoading = true;
     });
+    final ctx = context;
 
     final locations = await _apiService.getMyRouteToday();
     
@@ -37,22 +38,16 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     List<Marker> markers = [];
     
     // Check if locations is valid list
-    if (locations.isNotEmpty) {
+    if (locations.isNotEmpty && mounted) {
       for (var loc in locations) {
-        // Backend returns locations in a specific format, check serializer in tracking/views.py
-        // serialized_locations -> formatted_locations list
-        // Each item has 'location': {'lat': ..., 'lng': ...}, 'timestamp', etc.
-        
-        double? lat;
-        double? lng;
-        String? timestamp;
-        
-        if (loc['location'] != null) {
-           lat = loc['location']['lat'];
-           lng = loc['location']['lng'];
-        }
-        timestamp = loc['timestamp'];
-        
+        // Backend returns top-level latitude/longitude (tracking/serializers.py get_route_history).
+        // Fallback to nested location.lat/lng for compatibility.
+        final latVal = loc['latitude'] ?? loc['location']?['lat'];
+        final lngVal = loc['longitude'] ?? loc['location']?['lng'];
+        final double? lat = latVal is num ? (latVal as num).toDouble() : null;
+        final double? lng = lngVal is num ? (lngVal as num).toDouble() : null;
+        final timestamp = loc['timestamp']?.toString();
+
         if (lat != null && lng != null) {
           final point = LatLng(lat, lng);
           points.add(point);
@@ -63,7 +58,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               width: 40,
               height: 40,
               child: Tooltip(
-                message: timestamp != null ? _formatTime(timestamp) : '',
+                message: timestamp != null ? _formatTime(ctx, timestamp) : '',
                 child: const Icon(Icons.location_on, color: Colors.red, size: 30),
               ),
             ),
@@ -109,10 +104,11 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
   
-  String _formatTime(String isoString) {
+  String _formatTime(BuildContext context, String isoString) {
     try {
-      final dt = DateTime.parse(isoString).toLocal();
-      return DateFormat('HH:mm').format(dt);
+      final dt = DateTime.parse(isoString);
+      final local = dt.isUtc ? dt.toLocal() : dt;
+      return TimeOfDay.fromDateTime(local).format(context);
     } catch (e) {
       return '';
     }

@@ -8,6 +8,8 @@ class AppConfig {
   static const String tokenRefreshEndpoint = '/auth/token/refresh/';
   static const String locationLogEndpoint = '/tracking/log-location/';
   static const String myAttendanceEndpoint = '/attendance/my-attendance/';
+  static const String startDutyEndpoint = '/attendance/start-duty/';
+  static const String endDutyEndpoint = '/attendance/end-duty/';
   static const String employeeProfileEndpoint = '/employees/me/';
   
   // Location Tracking Configuration

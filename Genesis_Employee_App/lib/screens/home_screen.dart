@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
+import '../services/api_service.dart';
 import 'login_screen.dart';
 import 'attendance_screen.dart';
 import 'route_map_screen.dart';
@@ -112,7 +113,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
     _startTimer();
-    _checkServiceStatus();
+    // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
+    _locationService.stopTracking().then((_) {
+      if (mounted) _checkServiceStatus();
+    });
     _fetchCurrentPlaceName().then((_) {
       if (mounted) {
         _placeRefreshTimer = Timer.periodic(
@@ -121,7 +125,7 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     });
-    // Schedule periodic check
+    // Schedule periodic check (only stops service when outside working hours; never auto-starts)
     _locationService.scheduleTracking();
     // No auto-start: tracking starts only when user presses Start duty
   }
@@ -141,9 +145,13 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _updateTime() {
-    if (mounted) {
+    if (mounted && context.mounted) {
+      final now = DateTime.now();
+      final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
       setState(() {
-        _currentTime = DateFormat('hh:mm:ss a').format(DateTime.now());
+        _currentTime = use24
+            ? DateFormat('HH:mm:ss').format(now)
+            : DateFormat('hh:mm:ss a').format(now);
       });
     }
   }
@@ -231,26 +239,65 @@ class _HomeScreenState extends State<HomeScreen> {
     final isRunning = await service.isRunning();
 
     if (isRunning) {
+      // End duty: get current position and send to backend, then stop tracking
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+        await ApiService().endDuty(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          address: address,
+        );
+      } catch (_) {}
       await _locationService.stopTracking();
-      setState(() {
-        _isTracking = false;
-      });
+      if (mounted) setState(() => _isTracking = false);
     } else {
+      // Start duty: ensure location permission first (required for foreground service on Android 14+)
+      final hasLocation = await _locationService.requestLocationPermissionIfNeeded();
+      if (!hasLocation && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location permission is required to start duty. Enable it in Settings.'),
+          ),
+        );
+        return;
+      }
+      // Optional: ensure notification permission for foreground notification (Android 13+)
+      if (await Permission.notification.isDenied) {
+        await Permission.notification.request();
+      }
+      // Start duty: get current position, send to backend, then start tracking
+      try {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+        await ApiService().startDuty(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          address: address,
+        );
+      } catch (_) {}
       await _locationService.startTracking();
-      // Wait a bit for service to start
       await Future.delayed(const Duration(seconds: 1));
       final started = await service.isRunning();
-      
-      setState(() {
-        _isTracking = started;
-      });
-      
+      if (mounted) setState(() => _isTracking = started);
       if (!started && mounted) {
-         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not start tracking. Check permissions.')),
-         );
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+        );
       } else if (started && mounted) {
-        // Optionally refresh current place name after starting duty
+        final hasBackground = await _locationService.hasBackgroundLocationPermission();
+        if (!hasBackground) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
         Future.delayed(const Duration(seconds: 2), () {
           if (mounted) _fetchCurrentPlaceName();
         });
@@ -327,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isTracking ? 'Tracking Active' : 'Tracking Stopped',
+                            _isTracking ? 'Online' : 'Offline',
                             style: TextStyle(
                               color: _isTracking ? Colors.green : Colors.red,
                               fontWeight: FontWeight.bold,
@@ -385,7 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                         child: Text(
-                          _isTracking ? 'STOP TRACKING' : 'START DUTY',
+                          _isTracking ? 'END DUTY' : 'START DUTY',
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                       ),

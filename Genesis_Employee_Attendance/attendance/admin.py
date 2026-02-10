@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Attendance
+from .models import Attendance, DutySession
 
 
 @admin.register(Attendance)
@@ -46,3 +46,12 @@ class AttendanceAdmin(admin.ModelAdmin):
                 count += 1
         self.message_user(request, f'Calculated hours for {count} attendance records.')
     calculate_hours.short_description = "Calculate total hours for selected records"
+
+
+@admin.register(DutySession)
+class DutySessionAdmin(admin.ModelAdmin):
+    list_display = ['id', 'employee', 'date', 'start_time', 'end_time', 'total_hours']
+    list_filter = ['date', 'employee']
+    search_fields = ['employee__name', 'employee__email']
+    ordering = ['-date', '-start_time']
+    readonly_fields = ['id']

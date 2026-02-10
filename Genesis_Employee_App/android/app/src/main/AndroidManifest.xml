@@ -25,10 +25,7 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     
     <!-- Notification Permission (Android 13+) -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    
-    <!-- Boot Permission (for restarting service on reboot) -->
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" tools:targetApi="33" />
 
     <application
         android:label="Genesis"

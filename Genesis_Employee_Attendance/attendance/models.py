@@ -94,3 +94,45 @@ class Attendance(models.Model):
             self.total_hours = round(hours, 2)
             return self.total_hours
         return 0.00
+
+
+class DutySession(models.Model):
+    """
+    One duty session: Start Duty (start time + location) until End Duty (end time + location).
+    Employee can have multiple sessions per date.
+    """
+    id = models.AutoField(primary_key=True)
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='duty_sessions',
+        db_index=True,
+    )
+    date = models.DateField(db_index=True)
+    start_time = models.DateTimeField(db_index=True)
+    start_latitude = models.FloatField()
+    start_longitude = models.FloatField()
+    start_address = models.TextField(null=True, blank=True)
+    end_time = models.DateTimeField(null=True, blank=True, db_index=True)
+    end_latitude = models.FloatField(null=True, blank=True)
+    end_longitude = models.FloatField(null=True, blank=True)
+    end_address = models.TextField(null=True, blank=True)
+    total_hours = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text='Hours for this session (set when end_time is set)',
+    )
+
+    class Meta:
+        db_table = 'duty_sessions'
+        ordering = ['-date', '-start_time']
+        verbose_name = 'Duty Session'
+        verbose_name_plural = 'Duty Sessions'
+        indexes = [
+            models.Index(fields=['employee', 'date'], name='idx_duty_emp_date'),
+            models.Index(fields=['employee', 'end_time'], name='idx_duty_emp_end'),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.name} - {self.date} - {self.start_time}"

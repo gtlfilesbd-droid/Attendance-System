@@ -26,13 +26,13 @@ void main() {
         find.byWidgetPredicate(
           (Widget w) =>
               w is Text &&
-              (w.data == 'Tracking Active' || w.data == 'Tracking Stopped'),
+              (w.data == 'Online' || w.data == 'Offline'),
         ),
         findsOneWidget,
       );
     });
 
-    testWidgets('displays START DUTY or STOP TRACKING button', (WidgetTester tester) async {
+    testWidgets('displays START DUTY or END DUTY button', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: HomeScreen(),
@@ -43,7 +43,7 @@ void main() {
       final startOrStop = find.byWidgetPredicate(
         (Widget w) =>
             w is Text &&
-            (w.data == 'START DUTY' || w.data == 'STOP TRACKING'),
+            (w.data == 'START DUTY' || w.data == 'END DUTY'),
       );
       expect(startOrStop, findsOneWidget);
     });

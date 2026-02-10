@@ -235,7 +235,7 @@ Capture on a **phone** (and optionally tablet for Play). Use **light theme** and
 | # | Screen            | What to show |
 |---|-------------------|--------------|
 | 1 | **Login**         | Email and password fields, “Genesis Employee” title, “Sign in to start tracking” subtitle. |
-| 2 | **Home / Dashboard** | “Hello, [Name]”, current time, “Tracking Active” or “Tracking Stopped”, “START DUTY” or “STOP TRACKING”, “X locations logged today”, and the two action cards: “View My Attendance” and “View Today’s Route”. |
+| 2 | **Home / Dashboard** | “Hello, [Name]”, current time, “Online” or “Offline”, “START DUTY” or “END DUTY”, “X locations logged today”, and the two action cards: “View My Attendance” and “View Today’s Route”. |
 | 3 | **Attendance list** | List of attendance cards with date, check-in/check-out, total hours, and status (e.g. Present/Late). |
 | 4 | **Route map**      | Map with route polyline and “Distance Traveled” / “Points Logged” at the bottom. |
 | 5 | **Profile**        | Name, Employee ID, email, department, designation, and Logout button. |

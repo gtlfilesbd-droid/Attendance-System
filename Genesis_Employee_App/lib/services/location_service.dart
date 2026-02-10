@@ -35,30 +35,53 @@ class LocationService {
     print("LocationService: Initialized");
   }
   
+  /// Request permissions in correct order: "while using" first, then "all the time".
+  /// Handles denial gracefully; does not throw.
   Future<void> _requestPermissions() async {
-    // Request location permissions
-    var status = await Permission.location.status;
-    if (!status.isGranted) {
-      status = await Permission.location.request();
+    // 1. Request "while using the app" location first (required before "all the time" on Android 11+)
+    var locationStatus = await Permission.location.status;
+    if (!locationStatus.isGranted) {
+      locationStatus = await Permission.location.request();
     }
-    
-    // Request background location (Android 10+)
-    if (status.isGranted) {
-      var bgStatus = await Permission.locationAlways.status;
-      if (!bgStatus.isGranted) {
-        await Permission.locationAlways.request();
-      }
+    if (!locationStatus.isGranted) {
+      // Permanently denied or denied once; do not request background
+      return;
     }
 
-    // Request notification permission (Android 13+)
+    // 2. Request "allow all the time" (background) only after foreground is granted
+    var bgStatus = await Permission.locationAlways.status;
+    if (!bgStatus.isGranted) {
+      await Permission.locationAlways.request();
+    }
+
+    // 3. Notification permission (Android 13+) - needed for foreground service notification
     if (await Permission.notification.isDenied) {
       await Permission.notification.request();
     }
-    
-    // Request battery optimization ignore
+
+    // 4. Battery optimization (optional)
     if (await Permission.ignoreBatteryOptimizations.isDenied) {
       await Permission.ignoreBatteryOptimizations.request();
     }
+  }
+
+  /// True if at least foreground (while using) location is granted. Required before starting tracking.
+  Future<bool> hasLocationPermissionForTracking() async {
+    return await Permission.location.isGranted;
+  }
+
+  /// Request location permission if not granted. Returns true if we have at least foreground location.
+  Future<bool> requestLocationPermissionIfNeeded() async {
+    var status = await Permission.location.status;
+    if (status.isGranted) return true;
+    if (status.isPermanentlyDenied) return false;
+    status = await Permission.location.request();
+    return status.isGranted;
+  }
+
+  /// True if background location ("all the time") is granted. Caller may show a hint if false.
+  Future<bool> hasBackgroundLocationPermission() async {
+    return await Permission.locationAlways.isGranted;
   }
 
   /// Time limit disabled: always allows tracking when duty is active (Instance method)

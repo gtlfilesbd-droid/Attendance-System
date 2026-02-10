@@ -223,6 +223,60 @@ class ApiService {
     }
   }
 
+  /// Start Duty - record start time and location
+  /// POST /attendance/start-duty/
+  Future<bool> startDuty({
+    required double latitude,
+    required double longitude,
+    String? address,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'latitude': latitude,
+        'longitude': longitude,
+      };
+      if (address != null && address.isNotEmpty) payload['address'] = address;
+      final response = await _dio.post(
+        AppConfig.startDutyEndpoint,
+        data: payload,
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } on DioException catch (e) {
+      print('API: startDuty error: ${e.message}');
+      return false;
+    } catch (e) {
+      print('API: startDuty error: $e');
+      return false;
+    }
+  }
+
+  /// End Duty - record end time and location
+  /// POST /attendance/end-duty/
+  Future<bool> endDuty({
+    required double latitude,
+    required double longitude,
+    String? address,
+  }) async {
+    try {
+      final payload = <String, dynamic>{
+        'latitude': latitude,
+        'longitude': longitude,
+      };
+      if (address != null && address.isNotEmpty) payload['address'] = address;
+      final response = await _dio.post(
+        AppConfig.endDutyEndpoint,
+        data: payload,
+      );
+      return response.statusCode == 200 || response.statusCode == 201;
+    } on DioException catch (e) {
+      print('API: endDuty error: ${e.message}');
+      return false;
+    } catch (e) {
+      print('API: endDuty error: $e');
+      return false;
+    }
+  }
+
   /// Get My Attendance
   /// GET /attendance/my-attendance/?start_date=X&end_date=Y
   Future<Map<String, dynamic>> getMyAttendance({

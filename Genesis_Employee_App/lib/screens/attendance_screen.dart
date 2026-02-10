@@ -12,7 +12,7 @@ class AttendanceScreen extends StatefulWidget {
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final ApiService _apiService = ApiService();
   bool _isLoading = true;
-  List<dynamic> _attendanceRecords = [];
+  List<dynamic> _byDate = [];
   String _errorMessage = '';
 
   @override
@@ -39,44 +39,34 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (mounted) {
       setState(() {
         _isLoading = false;
-        // API returns { "summary": {...}, "records": [...] } or similar depending on implementation
-        // Based on previous checks, it returns Map<String, dynamic>. 
-        // Let's assume the API structure from export_csv view logic which implies list of records.
-        // Wait, getMyAttendance in ApiService returns Map<String, dynamic>.
-        // Let's inspect what the API returns. The export_csv view logic suggests it iterates over queryset.
-        // The ViewSet for attendance likely returns a list or paginated list.
-        // If ApiService.getMyAttendance returns the 'data' field of the response, check if it's a List or Map.
-        // The previous step implemented `getMyAttendance` returning `response.data['data']`.
-        // If the backend `AttendanceViewSet` returns a list, then `data` is a list.
-        // If it's paginated, it might be `{ "results": [...] }`.
-        
-        // API returns Map with 'results', 'records', or list in 'data'.
-        if (result.containsKey('results')) {
-          _attendanceRecords = List<dynamic>.from(result['results'] ?? []);
-        } else if (result.containsKey('records')) {
-          _attendanceRecords = List<dynamic>.from(result['records'] ?? []);
-        } else if (result.containsKey('data') && result['data'] is List) {
-          _attendanceRecords = List<dynamic>.from(result['data'] as List);
+        if (result.containsKey('by_date') && result['by_date'] is List) {
+          _byDate = List<dynamic>.from(result['by_date'] as List);
         } else {
-          _attendanceRecords = [];
+          _byDate = [];
         }
       });
     }
   }
 
-  Color _getStatusColor(String status) {
-    switch (status.toUpperCase()) {
-      case 'PRESENT':
-        return Colors.green;
-      case 'LATE':
-        return Colors.orange;
-      case 'ABSENT':
-        return Colors.red;
-      case 'HALF_DAY':
-        return Colors.blue;
-      default:
-        return Colors.grey;
+  /// Format ISO datetime string to time only in device local time; respects 12/24 hour format
+  String _formatTime(BuildContext context, String? iso) {
+    if (iso == null || iso.isEmpty) return '--:--';
+    try {
+      final dt = DateTime.parse(iso);
+      final local = dt.isUtc ? dt.toLocal() : dt;
+      return TimeOfDay.fromDateTime(local).format(context);
+    } catch (_) {
+      return '--:--';
     }
+  }
+
+  /// Format hours decimal to "Xh Ym"
+  String _formatHours(num? hours) {
+    if (hours == null) return '0h 0m';
+    final h = hours.floor();
+    final m = ((hours - h) * 60).round();
+    if (h > 0) return '${h}h ${m}m';
+    return '${m}m';
   }
 
   @override
@@ -84,102 +74,153 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Attendance'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _isLoading ? null : _fetchAttendance,
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage.isNotEmpty
               ? Center(child: Text(_errorMessage))
-              : _attendanceRecords.isEmpty
+              : _byDate.isEmpty
                   ? const Center(child: Text('No attendance records found'))
-                  : ListView.builder(
-                      itemCount: _attendanceRecords.length,
-                      padding: const EdgeInsets.all(8.0),
-                      itemBuilder: (context, index) {
-                        final record = _attendanceRecords[index];
-                        final date = record['date'] ?? '';
-                        final checkIn = record['check_in_time'] ?? '--:--';
-                        final checkOut = record['check_out_time'] ?? '--:--';
-                        final totalHours = record['total_hours'] ?? '0';
-                        final status = record['status'] ?? 'UNKNOWN';
+                  : RefreshIndicator(
+                      onRefresh: _fetchAttendance,
+                      child: ListView.builder(
+                        itemCount: _byDate.length,
+                        padding: const EdgeInsets.all(8.0),
+                        itemBuilder: (context, index) {
+                          final day = _byDate[index];
+                          final dateStr = day['date'] as String? ?? '';
+                          final sessions = day['sessions'] is List
+                              ? List<dynamic>.from(day['sessions'] as List)
+                              : <dynamic>[];
+                          final totalHours = (day['total_hours'] is num)
+                              ? (day['total_hours'] as num).toDouble()
+                              : 0.0;
 
-                        return Card(
-                          elevation: 2,
-                          margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      date,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                      ),
+                          return Card(
+                            elevation: 2,
+                            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    dateStr,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
                                     ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: _getStatusColor(status).withOpacity(0.1),
-                                        borderRadius: BorderRadius.circular(4),
-                                        border: Border.all(
-                                            color: _getStatusColor(status)),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ...sessions.asMap().entries.map((entry) {
+                                    final i = entry.key;
+                                    final s = entry.value as Map<String, dynamic>;
+                                    final startTime = _formatTime(context, s['start_time'] as String?);
+                                    final startLoc = s['start_location'] as String? ?? '—';
+                                    final endTime = _formatTime(context, s['end_time'] as String?);
+                                    final endLoc = s['end_location'] as String? ?? '—';
+                                    final sessionHours = (s['total_hours'] is num)
+                                        ? (s['total_hours'] as num).toDouble()
+                                        : 0.0;
+                                    return Padding(
+                                      padding: const EdgeInsets.only(bottom: 12),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          if (i > 0) const Divider(height: 16),
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(Icons.play_arrow, size: 18, color: Colors.green),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'Start: $startTime',
+                                                      style: const TextStyle(fontWeight: FontWeight.w600),
+                                                    ),
+                                                    Text(
+                                                      startLoc,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors.grey[600],
+                                                      ),
+                                                      maxLines: 2,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              const Icon(Icons.stop, size: 18, color: Colors.red),
+                                              const SizedBox(width: 6),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      'End: ${endTime == '--:--' ? '—' : endTime}',
+                                                      style: const TextStyle(fontWeight: FontWeight.w600),
+                                                    ),
+                                                    Text(
+                                                      endLoc,
+                                                      style: TextStyle(
+                                                        fontSize: 12,
+                                                        color: Colors.grey[600],
+                                                      ),
+                                                      maxLines: 2,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            'Session: ${_formatHours(sessionHours)}',
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              color: Colors.blue[700],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      child: Text(
-                                        status,
-                                        style: TextStyle(
-                                          color: _getStatusColor(status),
+                                    );
+                                  }),
+                                  const Divider(height: 24),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        'Total: ${_formatHours(totalHours)}',
+                                        style: const TextStyle(
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 12,
+                                          fontSize: 15,
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const Divider(),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                                  children: [
-                                    Column(
-                                      children: [
-                                        const Text('Check In',
-                                            style: TextStyle(
-                                                color: Colors.grey, fontSize: 12)),
-                                        Text(checkIn,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600)),
-                                      ],
-                                    ),
-                                    Column(
-                                      children: [
-                                        const Text('Check Out',
-                                            style: TextStyle(
-                                                color: Colors.grey, fontSize: 12)),
-                                        Text(checkOut,
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600)),
-                                      ],
-                                    ),
-                                    Column(
-                                      children: [
-                                        const Text('Total Hours',
-                                            style: TextStyle(
-                                                color: Colors.grey, fontSize: 12)),
-                                        Text('${totalHours}h',
-                                            style: const TextStyle(
-                                                fontWeight: FontWeight.w600)),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        );
-                      },
+                          );
+                        },
+                      ),
                     ),
     );
   }
