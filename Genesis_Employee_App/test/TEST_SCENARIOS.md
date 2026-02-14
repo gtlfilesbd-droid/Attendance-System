@@ -92,7 +92,7 @@ flutter test integration_test/ --device-id=<device_id>
 | HomeScreen        | `test/widget/home_screen_test.dart`  | App bar, tracking status, START DUTY, actions |
 | AttendanceScreen  | `test/widget/attendance_screen_test.dart` | App bar, loading, scaffold                  |
 | RouteMapScreen    | `test/widget/route_map_screen_test.dart` | App bar, loading, distance/points labels   |
-| ProfileScreen     | `test/widget/profile_screen_test.dart`  | Loading, app bar, logout, avatar            |
+| ProfileScreen     | `test/widget/profile_screen_test.dart`  | Loading, app bar, logout, read-only avatar  |
 
 **Run all widget tests:** `flutter test test/widget/`
 

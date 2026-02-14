@@ -48,7 +48,7 @@ def employee_me(request):
             {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
             status=status.HTTP_403_FORBIDDEN,
         )
-    serializer = EmployeeProfileSerializer(user)
+    serializer = EmployeeProfileSerializer(user, context={'request': request})
     return Response({
         'success': True,
         'data': serializer.data,
@@ -99,7 +99,7 @@ def employee_login(request):
             'data': {
                 'access': str(refresh.access_token),
                 'refresh': str(refresh),
-                'employee': EmployeeProfileSerializer(employee).data
+                'employee': EmployeeProfileSerializer(employee, context={'request': request}).data
             }
         }, status=status.HTTP_200_OK)
     
@@ -144,7 +144,7 @@ def employee_register(request):
         return Response({
             'success': True,
             'message': 'Employee registered successfully',
-            'data': EmployeeProfileSerializer(employee).data
+            'data': EmployeeProfileSerializer(employee, context={'request': request}).data
         }, status=status.HTTP_201_CREATED)
     
     return Response({
@@ -202,7 +202,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 'message': 'You do not have permission to view this profile'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        serializer = EmployeeProfileSerializer(employee)
+        serializer = EmployeeProfileSerializer(employee, context={'request': request})
         return Response({
             'success': True,
             'data': serializer.data
@@ -242,13 +242,17 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         
         if page is not None:
-            serializer = EmployeeProfileSerializer(page, many=True)
+            serializer = EmployeeProfileSerializer(
+                page, many=True, context={'request': request}
+            )
             return self.get_paginated_response({
                 'success': True,
                 'data': serializer.data
             })
         
-        serializer = EmployeeProfileSerializer(queryset, many=True)
+        serializer = EmployeeProfileSerializer(
+            queryset, many=True, context={'request': request}
+        )
         return Response({
             'success': True,
             'data': serializer.data
@@ -260,7 +264,9 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         Get current employee profile
         GET /api/employees/me/
         """
-        serializer = EmployeeProfileSerializer(request.user)
+        serializer = EmployeeProfileSerializer(
+            request.user, context={'request': request}
+        )
         return Response({
             'success': True,
             'data': serializer.data
@@ -278,7 +284,8 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         serializer = EmployeeProfileSerializer(
             request.user,
             data=request.data,
-            partial=request.method == 'PATCH'
+            partial=request.method == 'PATCH',
+            context={'request': request}
         )
         
         if serializer.is_valid():

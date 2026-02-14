@@ -11,7 +11,6 @@ import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/api_service.dart';
-import 'login_screen.dart';
 import 'attendance_screen.dart';
 import 'route_map_screen.dart';
 import 'profile_screen.dart';
@@ -105,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _currentTime = '';
   String _currentPlaceName = '—';
   String _employeeName = '';
+  String? _profilePictureUrl;
   Timer? _timer;
   Timer? _placeRefreshTimer;
 
@@ -122,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _fetchCurrentPlaceName().then((_) {
       if (mounted) {
         _placeRefreshTimer = Timer.periodic(
-          Duration(minutes: AppConfig.placeNameRefreshMinutes),
+          const Duration(minutes: AppConfig.placeNameRefreshMinutes),
           (_) => _fetchCurrentPlaceName(),
         );
       }
@@ -146,6 +146,13 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  static String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   void _updateTime() {
     if (mounted && context.mounted) {
       final now = DateTime.now();
@@ -159,10 +166,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    final data = await _authService.getEmployeeData();
-    if (data != null && mounted) {
+    var data = await _authService.getEmployeeData();
+    if (data == null || data['profile_picture_url'] == null) {
+      final fresh = await ApiService().getMyProfile();
+      if (fresh != null) data = fresh;
+    }
+    final d = data;
+    if (d != null && mounted) {
       setState(() {
-        _employeeName = data['name'] ?? 'Employee';
+        _employeeName = d['name'] ?? 'Employee';
+        _profilePictureUrl = d['profile_picture_url'] as String?;
       });
     }
   }
@@ -292,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       } else if (started && mounted) {
         final hasBackground = await _locationService.hasBackgroundLocationPermission();
-        if (!hasBackground) {
+        if (!hasBackground && mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
@@ -309,185 +322,108 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Genesis Employee'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const ProfileScreen()),
-              );
-            },
+      backgroundColor: colorScheme.surfaceContainerLowest,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeader(context, colorScheme),
+              const SizedBox(height: 28),
+              _buildTimeAndStatusCard(context, theme, colorScheme),
+              const SizedBox(height: 28),
+              _buildQuickActionCards(context, theme, colorScheme),
+              const SizedBox(height: 24),
+            ],
           ),
-        ],
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.primary.withValues(alpha: 0.08),
+            colorScheme.primary.withValues(alpha: 0.04),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+          width: 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
           children: [
-            Text(
-              'Hello, $_employeeName',
-              style: Theme.of(context).textTheme.headlineSmall,
+            Icon(
+              Icons.business_center,
+              size: 28,
+              color: colorScheme.primary,
             ),
-            const SizedBox(height: 20),
-            
-            // Tracking Status Card
-            Card(
-              elevation: 4,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    Text(
-                      _currentTime,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey,
-                      ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Genesis Employee',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: colorScheme.onSurface,
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      DateFormat('EEEE, MMMM d, y').format(DateTime.now()),
-                      style: const TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_greeting()}, $_employeeName',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _isTracking ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _isTracking ? Colors.green : Colors.red,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isTracking ? Icons.check_circle : Icons.stop_circle,
-                            color: _isTracking ? Colors.green : Colors.red,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _isTracking ? 'Online' : 'Offline',
-                            style: TextStyle(
-                              color: _isTracking ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.refresh, color: Colors.blue, size: 20),
-                          onPressed: () async {
-                            await _fetchCurrentPlaceName();
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Location refreshed')),
-                              );
-                            }
-                          },
-                          tooltip: 'Refresh location',
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.location_on, color: Colors.grey[600], size: 20),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _currentPlaceName.isEmpty ? '—' : _currentPlaceName,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Current location',
-                      style: TextStyle(color: Colors.grey, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _toggleTracking,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isTracking ? Colors.red : Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: Text(
-                          _isTracking ? 'END DUTY' : 'START DUTY',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                        ),
-                      ),
+                  ),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ProfileScreen()),
+                );
+              },
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
-              ),
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: _buildActionButton(
-                    context,
-                    'View My\nAttendance',
-                    Icons.calendar_today,
-                    Colors.blue,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const AttendanceScreen()),
-                      );
-                    },
-                  ),
+                child: CircleAvatar(
+                  radius: 24,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                  backgroundImage: (_profilePictureUrl != null && _profilePictureUrl!.isNotEmpty)
+                      ? NetworkImage(_profilePictureUrl!)
+                      : null,
+                  child: (_profilePictureUrl == null || _profilePictureUrl!.isEmpty)
+                      ? Icon(Icons.person, color: colorScheme.onSurfaceVariant, size: 28)
+                      : null,
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildActionButton(
-                    context,
-                    "View Today's\nRoute",
-                    Icons.map,
-                    Colors.orange,
-                    () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const RouteMapScreen()),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 40),
-            
-            // Bottom Info
-            const Center(
-              child: Text(
-                "Your location is tracked while duty is active",
-                style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
               ),
             ),
           ],
@@ -496,37 +432,266 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildActionButton(BuildContext context, String title, IconData icon, Color color, VoidCallback onTap) {
-    return Material(
-      color: Colors.white,
+  Widget _buildTimeAndStatusCard(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
+    return Card(
       elevation: 2,
-      borderRadius: BorderRadius.circular(16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+          width: 1,
+        ),
+      ),
+      color: colorScheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Text(
+              _currentTime,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontSize: 38,
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              DateFormat('EEEE, MMMM d, y').format(DateTime.now()),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: _isTracking ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: _isTracking
+                    ? [
+                        BoxShadow(
+                          color: Colors.green.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          spreadRadius: 0,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _isTracking ? Icons.circle : Icons.circle_outlined,
+                    color: _isTracking ? Colors.green : Colors.red,
+                    size: 12,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isTracking ? 'Online' : 'Offline',
+                    style: TextStyle(
+                      color: _isTracking ? Colors.green : Colors.red,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Divider(height: 24, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Current location',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.location_on_outlined,
+                        color: colorScheme.onSurfaceVariant,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _currentPlaceName.isEmpty ? '—' : _currentPlaceName,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: colorScheme.onSurface,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message: 'Refresh location',
+                        child: IconButton(
+                          icon: Icon(Icons.refresh, size: 22, color: colorScheme.primary),
+                          onPressed: () async {
+                            await _fetchCurrentPlaceName();
+                            if (mounted && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Location refreshed')),
+                              );
+                            }
+                          },
+                          style: IconButton.styleFrom(
+                            backgroundColor: colorScheme.surfaceContainerHighest,
+                            minimumSize: const Size(44, 44),
+                            padding: const EdgeInsets.all(10),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _toggleTracking,
+                icon: Icon(_isTracking ? Icons.stop_circle : Icons.play_circle_filled, size: 22),
+                label: Text(
+                  _isTracking ? 'END DUTY' : 'START DUTY',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isTracking ? colorScheme.error : Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  elevation: 3,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionCards(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _buildActionButton(
+              context,
+              title: 'View My\nAttendance',
+              subtitle: 'View sessions',
+              icon: Icons.calendar_today_outlined,
+              color: colorScheme.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AttendanceScreen()),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _buildActionButton(
+              context,
+              title: "View Today's\nRoute",
+              subtitle: "See today's path",
+              icon: Icons.route_outlined,
+              color: Colors.orange.shade700,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const RouteMapScreen()),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Material(
+      color: colorScheme.surface,
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 28),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Text(
                 title,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
                   fontSize: 14,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontSize: 12,
                 ),
               ),
             ],

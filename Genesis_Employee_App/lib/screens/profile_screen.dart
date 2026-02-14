@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -21,10 +23,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadProfile() async {
-    final data = await _authService.getEmployeeData();
+    final data = await ApiService().getMyProfile();
+    final profile = data ?? await _authService.getEmployeeData();
+    if (data != null) {
+      try {
+        await _authService.saveEmployeeData(data);
+      } catch (_) {
+        // e.g. secure storage unavailable (tests); still show profile
+      }
+    }
     if (mounted) {
       setState(() {
-        _employeeData = data;
+        _employeeData = profile;
         _isLoading = false;
       });
     }
@@ -42,9 +52,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        backgroundColor: colorScheme.surfaceContainerLowest,
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -53,10 +67,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final id = _employeeData?['employee_id'] ?? 'ID';
     final department = _employeeData?['department'] ?? 'Department';
     final designation = _employeeData?['designation'] ?? 'Designation';
+    final phone = _employeeData?['phone'] as String?;
+    final joinDateRaw = _employeeData?['join_date'] as String?;
+    final accountAgeDays = _employeeData?['account_age_days'];
+    final isNewEmployee = _employeeData?['is_new_employee'] == true;
+    final profilePictureUrl = _employeeData?['profile_picture_url'] as String?;
+
+    String joinDateFormatted = '—';
+    if (joinDateRaw != null && joinDateRaw.isNotEmpty) {
+      try {
+        final d = DateTime.parse(joinDateRaw);
+        joinDateFormatted = DateFormat('d MMM yyyy').format(d);
+      } catch (_) {}
+    }
+    final accountAgeStr = accountAgeDays is int
+        ? 'With us for $accountAgeDays days'
+        : (accountAgeDays is num ? 'With us for ${accountAgeDays.toInt()} days' : '—');
 
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text('My Profile'),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -64,89 +96,139 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            const SizedBox(height: 20),
-            Stack(
-              children: [
-                const CircleAvatar(
-                  radius: 60,
-                  backgroundColor: Colors.blueGrey,
-                  child: Icon(
-                    Icons.person,
-                    size: 80,
-                    color: Colors.white,
+      body: RefreshIndicator(
+        onRefresh: _loadProfile,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            children: [
+              const SizedBox(height: 16),
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+                    width: 2,
                   ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
                 ),
-                Positioned(
-                  bottom: 0,
-                  right: 0,
-                  child: CircleAvatar(
-                    backgroundColor: Theme.of(context).primaryColor,
-                    radius: 20,
-                    child: IconButton(
-                      icon: const Icon(Icons.camera_alt, size: 20, color: Colors.white),
-                      onPressed: () {
-                         ScaffoldMessenger.of(context).showSnackBar(
-                           const SnackBar(content: Text('Update profile picture not implemented yet')),
-                         );
-                      },
+                child: CircleAvatar(
+                  radius: 60,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                  backgroundImage: (profilePictureUrl != null && profilePictureUrl.isNotEmpty)
+                      ? NetworkImage(profilePictureUrl)
+                      : null,
+                  child: (profilePictureUrl == null || profilePictureUrl.isEmpty)
+                      ? Icon(
+                          Icons.person,
+                          size: 80,
+                          color: colorScheme.onSurfaceVariant,
+                        )
+                      : null,
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                name,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: colorScheme.onSurface,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              if (isNewEmployee) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'New employee',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              name,
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-            Text(
-              designation,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Colors.grey,
-                  ),
-            ),
-            const SizedBox(height: 32),
-            _buildInfoCard(Icons.badge, 'Employee ID', id),
-            _buildInfoCard(Icons.email, 'Email', email),
-            _buildInfoCard(Icons.business, 'Department', department),
-            
-            const SizedBox(height: 40),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _logout,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red.shade50,
-                  foregroundColor: Colors.red,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+              const SizedBox(height: 4),
+              Text(
+                designation,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
-                icon: const Icon(Icons.logout),
-                label: const Text('Logout'),
+                textAlign: TextAlign.center,
               ),
-            ),
-          ],
+              const SizedBox(height: 28),
+              _buildInfoCard(context, Icons.badge, 'Employee ID', id),
+              _buildInfoCard(context, Icons.email, 'Email', email),
+              _buildInfoCard(context, Icons.business, 'Department', department),
+              if (phone != null && phone.isNotEmpty)
+                _buildInfoCard(context, Icons.phone_outlined, 'Phone', phone),
+              _buildInfoCard(context, Icons.calendar_today_outlined, 'Join date', joinDateFormatted),
+              _buildInfoCard(context, Icons.schedule_outlined, 'Account', accountAgeStr),
+              const SizedBox(height: 40),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _logout,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: colorScheme.errorContainer,
+                    foregroundColor: colorScheme.onErrorContainer,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.logout, size: 20),
+                  label: const Text('Logout'),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildInfoCard(IconData icon, String label, String value) {
+  Widget _buildInfoCard(BuildContext context, IconData icon, String label, String value) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Card(
       elevation: 0,
-      color: Colors.grey.shade50,
-      margin: const EdgeInsets.only(bottom: 16),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4)),
+      ),
+      color: colorScheme.surface,
+      margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
-        leading: Icon(icon, color: Colors.blue),
-        title: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Icon(icon, color: colorScheme.primary, size: 24),
+        title: Text(
+          label,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+            fontSize: 12,
+          ),
+        ),
         subtitle: Text(
           value,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+          style: theme.textTheme.bodyLarge?.copyWith(
+            fontWeight: FontWeight.w500,
+            color: colorScheme.onSurface,
+          ),
         ),
       ),
     );

@@ -85,6 +85,14 @@ class AuthService {
     return await _storage.read(key: AppConfig.tokenKey);
   }
 
+  /// Update stored employee data (e.g. after fetching fresh profile from GET /me/).
+  Future<void> saveEmployeeData(Map<String, dynamic> data) async {
+    await _storage.write(
+      key: 'employee_data',
+      value: jsonEncode(data),
+    );
+  }
+
   /// Get stored employee data
   Future<Map<String, dynamic>?> getEmployeeData() async {
     final data = await _storage.read(key: 'employee_data');

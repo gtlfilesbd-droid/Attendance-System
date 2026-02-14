@@ -14,6 +14,9 @@ class ApiService {
   
   ApiService._internal();
 
+  /// Test-only: when set, getMyProfile() returns this instead of calling the API.
+  static Future<Map<String, dynamic>?> Function()? mockGetMyProfile;
+
   final Dio _dio = Dio();
   
   void initialize() {
@@ -138,6 +141,29 @@ class ApiService {
         'success': false,
         'message': 'Unexpected error: $e'
       };
+    }
+  }
+
+  /// Get current employee profile (GET /employees/me/).
+  /// Returns profile data including profile_picture_url for read-only display.
+  Future<Map<String, dynamic>?> getMyProfile() async {
+    if (mockGetMyProfile != null) return mockGetMyProfile!();
+    try {
+      ApiService().initialize();
+      final response = await _dio.get(AppConfig.employeeProfileEndpoint);
+      if (response.statusCode == 200 &&
+          response.data != null &&
+          response.data['success'] == true) {
+        final data = response.data['data'];
+        if (data is Map<String, dynamic>) return data;
+      }
+      return null;
+    } on DioException catch (e) {
+      if (kDebugMode) print('API: getMyProfile error: ${e.message}');
+      return null;
+    } catch (e) {
+      if (kDebugMode) print('API: getMyProfile error: $e');
+      return null;
     }
   }
 

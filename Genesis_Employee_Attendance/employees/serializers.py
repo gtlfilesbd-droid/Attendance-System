@@ -108,24 +108,36 @@ class EmployeeLoginSerializer(serializers.Serializer):
 
 class EmployeeProfileSerializer(serializers.ModelSerializer):
     """
-    Employee profile serializer (excludes password)
+    Employee profile serializer (excludes password).
+    profile_picture is read-only for app; only Admin can set it.
+    profile_picture_url is full URL for app display.
     """
     account_age_days = serializers.SerializerMethodField()
     is_new_employee = serializers.SerializerMethodField()
-    
+    profile_picture_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Employee
         fields = [
             'id', 'employee_id', 'name', 'email', 'phone',
             'department', 'designation', 'join_date', 'is_active',
-            'profile_picture', 'created_at', 'updated_at',
+            'profile_picture', 'profile_picture_url', 'created_at', 'updated_at',
             'account_age_days', 'is_new_employee'
         ]
         read_only_fields = [
             'id', 'employee_id', 'email', 'created_at', 'updated_at',
-            'account_age_days', 'is_new_employee'
+            'account_age_days', 'is_new_employee', 'profile_picture'
         ]
-    
+
+    def get_profile_picture_url(self, obj):
+        """Return full URL for profile picture; used by app for read-only display."""
+        if not obj.profile_picture:
+            return None
+        request = self.context.get('request')
+        if not request:
+            return None
+        return request.build_absolute_uri(obj.profile_picture.url)
+
     def get_account_age_days(self, obj):
         """Calculate days since employee joined"""
         from django.utils import timezone

@@ -60,20 +60,42 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  /// Format hours decimal to "Xh Ym"
-  String _formatHours(num? hours) {
-    if (hours == null) return '0h 0m';
-    final h = hours.floor();
-    final m = ((hours - h) * 60).round();
-    if (h > 0) return '${h}h ${m}m';
-    return '${m}m';
+  /// Format duration in seconds as "Xh Ym Zs" (always show hours, minutes, seconds for accuracy)
+  String _formatDurationHMS(int totalSeconds) {
+    if (totalSeconds < 0) return '0h 0m 0s';
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    return '${h}h ${m}m ${s}s';
+  }
+
+  /// Compute session duration in seconds from start_time and end_time (ISO); fallback to total_hours if parse fails
+  int _sessionDurationSeconds(Map<String, dynamic> s) {
+    final startStr = s['start_time'] as String?;
+    final endStr = s['end_time'] as String?;
+    if (startStr != null && startStr.isNotEmpty && endStr != null && endStr.isNotEmpty) {
+      try {
+        final start = DateTime.parse(startStr);
+        final end = DateTime.parse(endStr);
+        final startLocal = start.isUtc ? start.toLocal() : start;
+        final endLocal = end.isUtc ? end.toLocal() : end;
+        return endLocal.difference(startLocal).inSeconds;
+      } catch (_) {}
+    }
+    final hours = (s['total_hours'] is num) ? (s['total_hours'] as num).toDouble() : 0.0;
+    return (hours * 3600).round();
   }
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text('My Attendance'),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -84,37 +106,69 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage.isNotEmpty
-              ? Center(child: Text(_errorMessage))
+              ? Center(
+                  child: Text(
+                    _errorMessage,
+                    style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.error),
+                  ),
+                )
               : _byDate.isEmpty
-                  ? const Center(child: Text('No attendance records found'))
+                  ? Center(
+                      child: Text(
+                        'No attendance records found',
+                        style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
+                      ),
+                    )
                   : RefreshIndicator(
                       onRefresh: _fetchAttendance,
                       child: ListView.builder(
-                        itemCount: _byDate.length,
-                        padding: const EdgeInsets.all(8.0),
+                        itemCount: _byDate.length + 1,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         itemBuilder: (context, index) {
-                          final day = _byDate[index];
+                          if (index == 0) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Text(
+                                'Times are as recorded when duty started/ended.',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            );
+                          }
+                          final day = _byDate[index - 1];
                           final dateStr = day['date'] as String? ?? '';
                           final sessions = day['sessions'] is List
                               ? List<dynamic>.from(day['sessions'] as List)
                               : <dynamic>[];
-                          final totalHours = (day['total_hours'] is num)
-                              ? (day['total_hours'] as num).toDouble()
-                              : 0.0;
+                          int dayTotalSeconds = 0;
+                          for (final s in sessions) {
+                            if (s is Map<String, dynamic>) {
+                              dayTotalSeconds += _sessionDurationSeconds(s);
+                            }
+                          }
 
                           return Card(
                             elevation: 2,
-                            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(
+                                color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+                              ),
+                            ),
+                            color: colorScheme.surface,
+                            margin: const EdgeInsets.only(bottom: 12),
                             child: Padding(
-                              padding: const EdgeInsets.all(12.0),
+                              padding: const EdgeInsets.all(16),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
                                     dateStr,
-                                    style: const TextStyle(
+                                    style: theme.textTheme.titleMedium?.copyWith(
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                      color: colorScheme.onSurface,
                                     ),
                                   ),
                                   const SizedBox(height: 12),
@@ -125,33 +179,33 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     final startLoc = s['start_location'] as String? ?? '—';
                                     final endTime = _formatTime(context, s['end_time'] as String?);
                                     final endLoc = s['end_location'] as String? ?? '—';
-                                    final sessionHours = (s['total_hours'] is num)
-                                        ? (s['total_hours'] as num).toDouble()
-                                        : 0.0;
+                                    final sessionSecs = _sessionDurationSeconds(s);
                                     return Padding(
                                       padding: const EdgeInsets.only(bottom: 12),
                                       child: Column(
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
-                                          if (i > 0) const Divider(height: 16),
+                                          if (i > 0) Divider(height: 20, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
                                           Row(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Icon(Icons.play_arrow, size: 18, color: Colors.green),
-                                              const SizedBox(width: 6),
+                                              Icon(Icons.play_arrow, size: 20, color: colorScheme.primary),
+                                              const SizedBox(width: 8),
                                               Expanded(
                                                 child: Column(
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
                                                       'Start: $startTime',
-                                                      style: const TextStyle(fontWeight: FontWeight.w600),
+                                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                                        fontWeight: FontWeight.w600,
+                                                        color: colorScheme.onSurface,
+                                                      ),
                                                     ),
                                                     Text(
                                                       startLoc,
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: Colors.grey[600],
+                                                      style: theme.textTheme.bodySmall?.copyWith(
+                                                        color: colorScheme.onSurfaceVariant,
                                                       ),
                                                       maxLines: 2,
                                                       overflow: TextOverflow.ellipsis,
@@ -165,21 +219,23 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                           Row(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Icon(Icons.stop, size: 18, color: Colors.red),
-                                              const SizedBox(width: 6),
+                                              Icon(Icons.stop, size: 20, color: colorScheme.error),
+                                              const SizedBox(width: 8),
                                               Expanded(
                                                 child: Column(
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
                                                       'End: ${endTime == '--:--' ? '—' : endTime}',
-                                                      style: const TextStyle(fontWeight: FontWeight.w600),
+                                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                                        fontWeight: FontWeight.w600,
+                                                        color: colorScheme.onSurface,
+                                                      ),
                                                     ),
                                                     Text(
                                                       endLoc,
-                                                      style: TextStyle(
-                                                        fontSize: 12,
-                                                        color: Colors.grey[600],
+                                                      style: theme.textTheme.bodySmall?.copyWith(
+                                                        color: colorScheme.onSurfaceVariant,
                                                       ),
                                                       maxLines: 2,
                                                       overflow: TextOverflow.ellipsis,
@@ -189,28 +245,27 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                               ),
                                             ],
                                           ),
-                                          const SizedBox(height: 4),
+                                          const SizedBox(height: 6),
                                           Text(
-                                            'Session: ${_formatHours(sessionHours)}',
-                                            style: TextStyle(
-                                              fontSize: 13,
-                                              color: Colors.blue[700],
-                                              fontWeight: FontWeight.w500,
+                                            'Session: ${_formatDurationHMS(sessionSecs)}',
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: colorScheme.primary,
+                                              fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ],
                                       ),
                                     );
                                   }),
-                                  const Divider(height: 24),
+                                  Divider(height: 24, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
                                       Text(
-                                        'Total: ${_formatHours(totalHours)}',
-                                        style: const TextStyle(
+                                        'Total: ${_formatDurationHMS(dayTotalSeconds)}',
+                                        style: theme.textTheme.titleSmall?.copyWith(
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 15,
+                                          color: colorScheme.onSurface,
                                         ),
                                       ),
                                     ],

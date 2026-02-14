@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils.safestring import mark_safe
 from .models import Employee
 
 
@@ -8,22 +9,45 @@ class EmployeeAdmin(admin.ModelAdmin):
     list_filter = ['is_active', 'department', 'join_date', 'created_at']
     search_fields = ['employee_id', 'name', 'email', 'phone', 'department', 'designation']
     ordering = ['-created_at']
-    readonly_fields = ['id', 'created_at', 'updated_at']
+    readonly_fields = ['id', 'created_at', 'updated_at', 'profile_picture_preview']
     
     fieldsets = (
+        ('Profile', {
+            'fields': ('profile_picture_preview', 'profile_picture'),
+            'description': 'Profile picture is shown in the app. Only admins can change it here.'
+        }),
         ('Basic Information', {
             'fields': ('id', 'employee_id', 'name', 'email', 'phone', 'password')
         }),
         ('Employment Details', {
             'fields': ('department', 'designation', 'join_date', 'is_active')
         }),
-        ('Profile', {
-            'fields': ('profile_picture',)
-        }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at')
         }),
     )
+    
+    def profile_picture_preview(self, obj):
+        if obj and obj.profile_picture:
+            label = f'{obj.employee_id} - {obj.name}' if obj.employee_id and obj.name else 'Profile picture'
+            return mark_safe(
+                '<div style="margin-bottom: 12px;">'
+                '<img src="%s" alt="%s" style="'
+                'width: 120px; height: 120px; object-fit: cover; border-radius: 50%%; '
+                'border: 3px solid #e0e0e0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); '
+                'display: block;" />'
+                '<span style="display: block; margin-top: 8px; font-size: 13px; color: #666;">%s</span>'
+                '</div>'
+                % (obj.profile_picture.url, label, label)
+            )
+        return mark_safe(
+            '<div style="width: 120px; height: 120px; border-radius: 50%%; '
+            'background: #f5f5f5; border: 2px dashed #ccc; display: flex; align-items: center; '
+            'justify-content: center; color: #999; font-size: 12px; text-align: center; padding: 8px;">'
+            'No image set</div>'
+        )
+    
+    profile_picture_preview.short_description = 'Profile picture'
     
     def save_model(self, request, obj, form, change):
         # Hash password if it's being set/changed
