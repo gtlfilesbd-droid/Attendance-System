@@ -389,6 +389,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         } catch (_) {}
         await _locationService.stopTracking();
+        await LocationService.clearLastSentLocation();
         if (mounted) {
           setState(() {
             _isTracking = false;

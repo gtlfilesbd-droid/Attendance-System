@@ -20,7 +20,14 @@ class AppConfig {
   /// Interval in minutes to auto-refresh current location name on home screen.
   static const int placeNameRefreshMinutes = 15;
   static const double locationAccuracy = 10.0; // meters
-  
+
+  /// Send-side filter: do not send location if accuracy is worse than this (meters).
+  static const double maxAccuracyToSendMeters = 100.0;
+  /// Send-side filter: do not send if moved less than this since last send (meters).
+  static const double minMovementToSendMeters = 10.0;
+  /// Send-side filter: when standing still, still send at least every N seconds.
+  static const int maxIntervalWhenStillSeconds = 300;
+
   // Storage Keys
   static const String tokenKey = 'auth_token';
   static const String refreshTokenKey = 'refresh_token';

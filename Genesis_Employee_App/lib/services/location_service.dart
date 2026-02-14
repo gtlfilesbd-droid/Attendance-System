@@ -116,6 +116,22 @@ class LocationService {
     await BackgroundWorker().stopService();
   }
 
+  static const String _keyLastSentLat = 'last_sent_lat';
+  static const String _keyLastSentLng = 'last_sent_lng';
+  static const String _keyLastSentTimestamp = 'last_sent_timestamp';
+
+  /// Clear last-sent location (call when user ends duty so next Start duty sends first point).
+  static Future<void> clearLastSentLocation() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_keyLastSentLat);
+      await prefs.remove(_keyLastSentLng);
+      await prefs.remove(_keyLastSentTimestamp);
+    } catch (e) {
+      print('LocationService: clearLastSentLocation error: $e');
+    }
+  }
+
   static Future<void> sendLocationToBackend(
     Position position,
     Battery battery,
@@ -124,7 +140,6 @@ class LocationService {
       final batteryLevel = await battery.batteryLevel;
       final timestamp = DateTime.now().toIso8601String();
 
-      // Detailed logging: auth and config
       final token = await AuthService().getToken();
       if (token == null || token.isEmpty) {
         print('FLUTTER_BG_SERVICE: ERROR No auth token found - cannot send location');
@@ -138,7 +153,32 @@ class LocationService {
         });
         return;
       }
-      print('FLUTTER_BG_SERVICE: Token present (length=${token.length})');
+
+      // Send-side filter: skip bad GPS
+      if (position.accuracy > AppConfig.maxAccuracyToSendMeters) {
+        print('FLUTTER_BG_SERVICE: Skipping send (accuracy ${position.accuracy}m > ${AppConfig.maxAccuracyToSendMeters}m)');
+        return;
+      }
+
+      // Send-side filter: skip if standing still (no filter on first send)
+      final prefs = await SharedPreferences.getInstance();
+      final lastLat = prefs.getDouble(_keyLastSentLat);
+      final lastLng = prefs.getDouble(_keyLastSentLng);
+      final lastTs = prefs.getString(_keyLastSentTimestamp);
+      if (lastLat != null && lastLng != null && lastTs != null) {
+        final distM = Geolocator.distanceBetween(
+          lastLat, lastLng, position.latitude, position.longitude,
+        );
+        final lastTime = DateTime.tryParse(lastTs);
+        final elapsedSec = lastTime != null
+            ? DateTime.now().difference(lastTime).inSeconds
+            : AppConfig.maxIntervalWhenStillSeconds + 1;
+        if (distM < AppConfig.minMovementToSendMeters &&
+            elapsedSec < AppConfig.maxIntervalWhenStillSeconds) {
+          print('FLUTTER_BG_SERVICE: Skipping send (standing still: ${distM.toStringAsFixed(0)}m moved, ${elapsedSec}s since last)');
+          return;
+        }
+      }
 
       print(
         'FLUTTER_BG_SERVICE: Sending location lat=${position.latitude}, lng=${position.longitude}, '
@@ -155,6 +195,9 @@ class LocationService {
 
       if (success) {
         print('FLUTTER_BG_SERVICE: Location sent successfully to API');
+        await prefs.setDouble(_keyLastSentLat, position.latitude);
+        await prefs.setDouble(_keyLastSentLng, position.longitude);
+        await prefs.setString(_keyLastSentTimestamp, timestamp);
       } else {
         print('FLUTTER_BG_SERVICE: API returned failure (no 200/201). Saving offline.');
         await _saveOffline({

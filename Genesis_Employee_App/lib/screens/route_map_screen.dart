@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../utils/route_processing.dart';
 
 class RouteMapScreen extends StatefulWidget {
   const RouteMapScreen({super.key});
@@ -18,6 +19,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   List<LatLng> _routePoints = [];
   List<Marker> _markers = [];
   double _totalDistanceKm = 0.0;
+  /// Raw count from API for "Points Logged" label.
+  int _rawPointsCount = 0;
   final MapController _mapController = MapController();
   static const double _minZoom = 2.0;
   static const double _maxZoom = 19.0;
@@ -61,6 +64,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           _routePoints = [];
           _markers = [];
           _totalDistanceKm = 0;
+          _rawPointsCount = 0;
         });
       }
       return;
@@ -73,45 +77,50 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
     if (!mounted) return;
 
-    // Parse locations
-    List<LatLng> points = [];
+    // Process route: filter, dedupe, smooth; get points and distance for display
+    final processed = processRouteForDisplay(locations);
+    final points = processed.points;
+    final distance = processed.distanceKm;
+
+    // Build markers: only start and end
     List<Marker> markers = [];
-
-    // Check if locations is valid list
-    if (locations.isNotEmpty) {
-      for (var loc in locations) {
-        // Backend returns top-level latitude/longitude (tracking/serializers.py get_route_history).
-        // Fallback to nested location.lat/lng for compatibility.
-        final latVal = loc['latitude'] ?? loc['location']?['lat'];
-        final lngVal = loc['longitude'] ?? loc['location']?['lng'];
-        final double? lat = latVal is num ? latVal.toDouble() : null;
-        final double? lng = lngVal is num ? lngVal.toDouble() : null;
-        final timestamp = loc['timestamp']?.toString();
-
-        if (lat != null && lng != null) {
-          final point = LatLng(lat, lng);
-          points.add(point);
-          final tooltipMessage = timestamp != null ? _formatTimeIso(timestamp) : '';
-          markers.add(
-            Marker(
-              point: point,
-              width: 40,
-              height: 40,
-              child: Tooltip(
-                message: tooltipMessage,
-                child: const Icon(Icons.location_on, color: Colors.red, size: 30),
-              ),
-            ),
-          );
-        }
-      }
-    }
-
-    // Calculate distance (rough estimate using LatLng.distance)
-    double distance = 0;
-    const Distance distanceCalculator = Distance();
-    for (int i = 0; i < points.length - 1; i++) {
-      distance += distanceCalculator.as(LengthUnit.Kilometer, points[i], points[i+1]);
+    if (points.length >= 2) {
+      final firstTimestamp = locations.isNotEmpty ? locations.first['timestamp']?.toString() : null;
+      final lastTimestamp = locations.isNotEmpty ? locations.last['timestamp']?.toString() : null;
+      markers.add(
+        Marker(
+          point: points.first,
+          width: 40,
+          height: 40,
+          child: Tooltip(
+            message: firstTimestamp != null ? 'Start ${_formatTimeIso(firstTimestamp)}' : 'Start',
+            child: const Icon(Icons.trip_origin, color: Colors.green, size: 32),
+          ),
+        ),
+      );
+      markers.add(
+        Marker(
+          point: points.last,
+          width: 40,
+          height: 40,
+          child: Tooltip(
+            message: lastTimestamp != null ? 'End ${_formatTimeIso(lastTimestamp)}' : 'End',
+            child: const Icon(Icons.location_on, color: Colors.red, size: 32),
+          ),
+        ),
+      );
+    } else if (points.length == 1) {
+      markers.add(
+        Marker(
+          point: points.first,
+          width: 40,
+          height: 40,
+          child: const Tooltip(
+            message: 'Start / End',
+            child: Icon(Icons.location_on, color: Colors.blue, size: 32),
+          ),
+        ),
+      );
     }
 
     if (mounted) {
@@ -119,13 +128,13 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         _routePoints = points;
         _markers = markers;
         _totalDistanceKm = distance;
+        _rawPointsCount = locations.length;
         _isLoading = false;
         if (points.isNotEmpty) {
           _currentZoom = 14.0;
         }
       });
 
-      // Zoom to fit if points exist (after setState so map is built)
       if (points.isNotEmpty) {
         _mapController.move(points.last, 14.0);
       }
@@ -330,7 +339,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                       ),
                     ),
                     Text(
-                      '${_routePoints.length}',
+                      '$_rawPointsCount',
                       style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
