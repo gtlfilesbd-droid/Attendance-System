@@ -112,7 +112,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadData();
-    _startTimer();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _startTimer();
+    });
     // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
     _locationService.stopTracking().then((_) {
       if (mounted) _checkServiceStatus();
