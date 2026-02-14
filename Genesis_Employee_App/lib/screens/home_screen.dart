@@ -105,6 +105,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _currentPlaceName = '—';
   String _employeeName = '';
   String? _profilePictureUrl;
+  DateTime? _dutyStartTime;
+  String _liveDutyDuration = '0h 0m 0s';
+  int _todayBaseSeconds = 0;
+  DateTime _todayDate = DateTime(1970, 1, 1);
   Timer? _timer;
   Timer? _placeRefreshTimer;
 
@@ -113,7 +117,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _startTimer();
+      if (mounted) {
+        _startTimer();
+        _loadTodayDutyTime();
+      }
     });
     // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
     _locationService.stopTracking().then((_) {
@@ -153,16 +160,37 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Good evening';
   }
 
+  static String _formatDurationHMS(int totalSeconds) {
+    if (totalSeconds < 0) return '0h 0m 0s';
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    return '${h}h ${m}m ${s}s';
+  }
+
   void _updateTime() {
-    if (mounted && context.mounted) {
-      final now = DateTime.now();
-      final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
-      setState(() {
-        _currentTime = use24
-            ? DateFormat('HH:mm:ss').format(now)
-            : DateFormat('hh:mm:ss a').format(now);
-      });
+    if (!mounted || !context.mounted) return;
+    final now = DateTime.now();
+    final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
+    // Date change: refetch today's duty for new date
+    if (now.year != _todayDate.year ||
+        now.month != _todayDate.month ||
+        now.day != _todayDate.day) {
+      _loadTodayDutyTime();
+      return;
     }
+    int totalSeconds = _todayBaseSeconds;
+    if (_dutyStartTime != null) {
+      totalSeconds += now.difference(_dutyStartTime!).inSeconds;
+      if (totalSeconds < 0) totalSeconds = 0;
+    }
+    final liveDuration = _formatDurationHMS(totalSeconds);
+    setState(() {
+      _currentTime = use24
+          ? DateFormat('HH:mm:ss').format(now)
+          : DateFormat('hh:mm:ss a').format(now);
+      _liveDutyDuration = liveDuration;
+    });
   }
 
   Future<void> _loadData() async {
@@ -178,6 +206,78 @@ class _HomeScreenState extends State<HomeScreen> {
         _profilePictureUrl = d['profile_picture_url'] as String?;
       });
     }
+  }
+
+  /// Session duration in seconds from start_time/end_time (ISO); matches My Attendance logic.
+  static int _sessionDurationSeconds(Map<String, dynamic> sess) {
+    final startStr = sess['start_time'] as String?;
+    final endStr = sess['end_time'] as String?;
+    if (startStr != null &&
+        startStr.isNotEmpty &&
+        endStr != null &&
+        endStr.isNotEmpty) {
+      try {
+        final start = DateTime.parse(startStr);
+        final end = DateTime.parse(endStr);
+        final startLocal = start.isUtc ? start.toLocal() : start;
+        final endLocal = end.isUtc ? end.toLocal() : end;
+        return endLocal.difference(startLocal).inSeconds;
+      } catch (_) {}
+    }
+    final hours = (sess['total_hours'] is num)
+        ? (sess['total_hours'] as num).toDouble()
+        : 0.0;
+    return (hours * 3600).round();
+  }
+
+  /// Fetch today's attendance and set _todayBaseSeconds, _todayDate, and open session if any.
+  /// Uses start_time/end_time for duration (same as My Attendance) so Home and My Attendance match.
+  Future<void> _loadTodayDutyTime() async {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final result = await ApiService().getMyAttendance(
+      startDate: todayStr,
+      endDate: todayStr,
+    );
+    if (!mounted) return;
+    final byDate = result['by_date'] as List<dynamic>?;
+    int baseSeconds = 0;
+    DateTime? openSessionStart;
+    if (byDate != null && byDate.isNotEmpty) {
+      for (final entry in byDate) {
+        final map = entry as Map<String, dynamic>?;
+        if (map == null) continue;
+        final dateStr = map['date'] as String?;
+        if (dateStr != todayStr) continue;
+        final sessions = map['sessions'] as List<dynamic>?;
+        if (sessions == null) continue;
+        for (final s in sessions) {
+          final sess = s as Map<String, dynamic>?;
+          if (sess == null) continue;
+          final endTime = sess['end_time'];
+          if (endTime == null || endTime.toString().isEmpty) {
+            final startStr = sess['start_time'] as String?;
+            if (startStr != null && startStr.isNotEmpty) {
+              try {
+                final dt = DateTime.parse(startStr);
+                openSessionStart = dt.isUtc ? dt.toLocal() : dt;
+              } catch (_) {}
+            }
+          } else {
+            baseSeconds += _sessionDurationSeconds(sess);
+          }
+        }
+        break;
+      }
+    }
+    setState(() {
+      _todayBaseSeconds = baseSeconds;
+      _todayDate = DateTime(now.year, now.month, now.day);
+      if (openSessionStart != null) {
+        _dutyStartTime = openSessionStart;
+        _isTracking = true;
+      }
+    });
   }
 
   Future<void> _checkServiceStatus() async {
@@ -267,7 +367,19 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       } catch (_) {}
       await _locationService.stopTracking();
-      if (mounted) setState(() => _isTracking = false);
+      if (mounted) {
+        setState(() {
+          _isTracking = false;
+          _dutyStartTime = null;
+        });
+        // Refetch today's attendance so duty time matches My Attendance (server start/end times)
+        await _loadTodayDutyTime();
+        if (mounted) {
+          setState(() {
+            _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
+          });
+        }
+      }
     } else {
       // Start duty: ensure location permission first (required for foreground service on Android 14+)
       final hasLocation = await _locationService.requestLocationPermissionIfNeeded();
@@ -284,12 +396,13 @@ class _HomeScreenState extends State<HomeScreen> {
         await Permission.notification.request();
       }
       // Start duty: get current position, send to backend, then start tracking
+      Map<String, dynamic>? startData;
       try {
         final position = await Geolocator.getCurrentPosition(
           desiredAccuracy: LocationAccuracy.high,
         );
         final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-        await ApiService().startDuty(
+        startData = await ApiService().startDuty(
           latitude: position.latitude,
           longitude: position.longitude,
           address: address,
@@ -298,7 +411,22 @@ class _HomeScreenState extends State<HomeScreen> {
       await _locationService.startTracking();
       await Future.delayed(const Duration(seconds: 1));
       final started = await service.isRunning();
-      if (mounted) setState(() => _isTracking = started);
+      if (mounted) {
+        DateTime? dutyStart;
+        if (started && startData != null) {
+          final startTimeStr = startData['start_time'] as String?;
+          if (startTimeStr != null && startTimeStr.isNotEmpty) {
+            try {
+              final dt = DateTime.parse(startTimeStr);
+              dutyStart = dt.isUtc ? dt.toLocal() : dt;
+            } catch (_) {}
+          }
+        }
+        setState(() {
+          _isTracking = started;
+          _dutyStartTime = dutyStart;
+        });
+      }
       if (!started && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not start tracking. Check permissions.')),
@@ -334,11 +462,13 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _buildHeader(context, colorScheme),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
               _buildTimeAndStatusCard(context, theme, colorScheme),
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
               _buildQuickActionCards(context, theme, colorScheme),
               const SizedBox(height: 24),
+              _buildDutyTimeCard(context, theme, colorScheme),
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -370,7 +500,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(
               Icons.business_center,
-              size: 28,
+              size: 26,
               color: colorScheme.primary,
             ),
             const SizedBox(width: 12),
@@ -415,13 +545,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 child: CircleAvatar(
-                  radius: 24,
+                  radius: 22,
                   backgroundColor: colorScheme.surfaceContainerHighest,
                   backgroundImage: (_profilePictureUrl != null && _profilePictureUrl!.isNotEmpty)
                       ? NetworkImage(_profilePictureUrl!)
                       : null,
                   child: (_profilePictureUrl == null || _profilePictureUrl!.isEmpty)
-                      ? Icon(Icons.person, color: colorScheme.onSurfaceVariant, size: 28)
+                      ? Icon(Icons.person, color: colorScheme.onSurfaceVariant, size: 26)
                       : null,
                 ),
               ),
@@ -444,28 +574,28 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       color: colorScheme.surface,
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         child: Column(
           children: [
             Text(
               _currentTime,
               style: theme.textTheme.headlineMedium?.copyWith(
-                fontSize: 38,
+                fontSize: 32,
                 fontWeight: FontWeight.bold,
                 color: colorScheme.onSurface,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Text(
               DateFormat('EEEE, MMMM d, y').format(DateTime.now()),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: _isTracking ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(24),
@@ -499,11 +629,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            Divider(height: 24, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            Divider(height: 20, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(12),
@@ -565,7 +695,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 28),
+            const SizedBox(height: 20),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -578,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _isTracking ? colorScheme.error : Colors.green,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
                   elevation: 3,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
@@ -633,6 +763,67 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _buildDutyTimeCard(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
+    final todayLabel = DateFormat('d MMM yyyy').format(DateTime.now());
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.primary.withValues(alpha: 0.08),
+            colorScheme.primary.withValues(alpha: 0.04),
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              "Today's Duty Time",
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              todayLabel,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.9),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _liveDutyDuration.isEmpty ? '0h 0m 0s' : _liveDutyDuration,
+              style: theme.textTheme.headlineMedium?.copyWith(
+                fontSize: 36,
+                fontWeight: FontWeight.bold,
+                color: colorScheme.primary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildActionButton(
     BuildContext context, {
     required String title,
@@ -658,7 +849,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
@@ -669,9 +860,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: color.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, color: color, size: 28),
+                child: Icon(icon, color: color, size: 26),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Text(
                 title,
                 textAlign: TextAlign.center,

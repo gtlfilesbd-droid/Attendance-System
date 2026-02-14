@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../config/app_config.dart';
@@ -249,9 +248,10 @@ class ApiService {
     }
   }
 
-  /// Start Duty - record start time and location
+  /// Start Duty - record start time and location.
+  /// Returns response data (start_time, session_id, date) on success, null on failure.
   /// POST /attendance/start-duty/
-  Future<bool> startDuty({
+  Future<Map<String, dynamic>?> startDuty({
     required double latitude,
     required double longitude,
     String? address,
@@ -266,13 +266,20 @@ class ApiService {
         AppConfig.startDutyEndpoint,
         data: payload,
       );
-      return response.statusCode == 200 || response.statusCode == 201;
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        if (data is Map<String, dynamic> && data['data'] is Map<String, dynamic>) {
+          return data['data'] as Map<String, dynamic>;
+        }
+        return null;
+      }
+      return null;
     } on DioException catch (e) {
       print('API: startDuty error: ${e.message}');
-      return false;
+      return null;
     } catch (e) {
       print('API: startDuty error: $e');
-      return false;
+      return null;
     }
   }
 

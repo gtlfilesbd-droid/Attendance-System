@@ -69,6 +69,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return '${h}h ${m}m ${s}s';
   }
 
+  bool _isToday(String dateStr) {
+    if (dateStr.isEmpty) return false;
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    return dateStr == today;
+  }
+
   /// Compute session duration in seconds from start_time and end_time (ISO); fallback to total_hours if parse fails
   int _sessionDurationSeconds(Map<String, dynamic> s) {
     final startStr = s['start_time'] as String?;
@@ -262,7 +268,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
                                       Text(
-                                        'Total: ${_formatDurationHMS(dayTotalSeconds)}',
+                                        _isToday(dateStr)
+                                            ? "Today's Duty Time: ${_formatDurationHMS(dayTotalSeconds)}"
+                                            : 'Total: ${_formatDurationHMS(dayTotalSeconds)}',
                                         style: theme.textTheme.titleSmall?.copyWith(
                                           fontWeight: FontWeight.bold,
                                           color: colorScheme.onSurface,
