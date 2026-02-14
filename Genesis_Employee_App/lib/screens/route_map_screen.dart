@@ -3,6 +3,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 
 class RouteMapScreen extends StatefulWidget {
   const RouteMapScreen({super.key});
@@ -22,6 +23,9 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   static const double _maxZoom = 19.0;
   /// Zoom level for button state; avoid reading MapController.camera before it is initialized.
   double _currentZoom = 13.0;
+  /// Selected date for route; default today.
+  DateTime _selectedDate = DateTime.now();
+  String? _loadError;
 
   void _zoomIn() {
     final camera = _mapController.camera;
@@ -44,9 +48,29 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   Future<void> _fetchRoute() async {
     setState(() {
       _isLoading = true;
+      _loadError = null;
     });
 
-    final locations = await _apiService.getMyRouteToday();
+    final employeeData = await AuthService().getEmployeeData();
+    final employeeId = employeeData?['id']?.toString() ?? employeeData?['employee_id']?.toString();
+    if (employeeId == null || employeeId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadError = 'Unable to load route';
+          _routePoints = [];
+          _markers = [];
+          _totalDistanceKm = 0;
+        });
+      }
+      return;
+    }
+
+    final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final locations = await _apiService.getMyRoute(
+      employeeId: employeeId,
+      date: dateStr,
+    );
     if (!mounted) return;
 
     // Parse locations
@@ -145,19 +169,88 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     );
   }
 
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedDate = picked;
+      });
+      _fetchRoute();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Today's Route"),
+        title: const Text('Route'),
       ),
       body: Column(
         children: [
+          Material(
+            elevation: 1,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              child: Row(
+                children: [
+                  Text(
+                    'Date:',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  InkWell(
+                    onTap: _isLoading ? null : _pickDate,
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: colorScheme.outline),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.calendar_today, size: 20, color: colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormat('d MMM yyyy').format(_selectedDate),
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.arrow_drop_down, color: colorScheme.onSurfaceVariant),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _routePoints.isEmpty 
-                  ? const Center(child: Text("No route data for today"))
+                : _loadError != null
+                  ? Center(child: Text(_loadError!, style: TextStyle(color: colorScheme.error)))
+                  : _routePoints.isEmpty
+                  ? Center(
+                      child: Text(
+                        "No route data for ${DateFormat('d MMM yyyy').format(_selectedDate)}",
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
+                      ),
+                    )
                   : Stack(
                       fit: StackFit.expand,
                       children: [

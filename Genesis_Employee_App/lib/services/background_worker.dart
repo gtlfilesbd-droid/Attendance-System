@@ -51,10 +51,7 @@ class BackgroundWorker {
     print("BackgroundWorker: Initializing...");
 
     // Initialize WorkManager
-    await Workmanager().initialize(
-      callbackDispatcher,
-      isInDebugMode: true 
-    );
+    await Workmanager().initialize(callbackDispatcher);
 
     final service = FlutterBackgroundService();
 
@@ -140,7 +137,7 @@ class BackgroundWorker {
     });
 
     // Tracking Loop - every N seconds while duty is active (Start duty / End duty)
-    Timer.periodic(Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty), (timer) async {
+    Timer.periodic(const Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty), (timer) async {
       if (service is AndroidServiceInstance) {
         if (await service.isForegroundService()) {
           service.setForegroundNotificationInfo(
@@ -152,20 +149,18 @@ class BackgroundWorker {
 
       try {
         final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high);
-        
+            desiredAccuracy: LocationAccuracy.medium);
         await LocationService.sendLocationToBackend(position, battery);
         await LocationService.syncOfflineData();
-
       } catch (e) {
         print('BackgroundWorker: Error getting location $e');
       }
     });
-    
+
     // Initial check
     try {
         final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high);
+            desiredAccuracy: LocationAccuracy.medium);
         await LocationService.sendLocationToBackend(position, battery);
     } catch (e) {
         print("BackgroundWorker: Initial location error $e");

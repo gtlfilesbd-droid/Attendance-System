@@ -248,6 +248,42 @@ class ApiService {
     }
   }
 
+  /// Get my route for a given date (and optional time range).
+  /// GET /tracking/employee-route/?employee_id=uuid&date=YYYY-MM-DD&start_time=&end_time=
+  /// Backend returns { "data": { "locations": [...] } }; each location may have latitude/longitude or location.lat/lng.
+  Future<List<dynamic>> getMyRoute({
+    required String employeeId,
+    String? date,
+    String? startTime,
+    String? endTime,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{'employee_id': employeeId};
+      if (date != null && date.isNotEmpty) queryParams['date'] = date;
+      if (startTime != null && startTime.isNotEmpty) queryParams['start_time'] = startTime;
+      if (endTime != null && endTime.isNotEmpty) queryParams['end_time'] = endTime;
+      final response = await _dio.get(
+        '/tracking/employee-route/',
+        queryParameters: queryParams,
+      );
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        final data = response.data['data'];
+        if (data == null) return [];
+        final locations = data['locations'];
+        if (locations == null) return [];
+        if (locations is List) return List<dynamic>.from(locations);
+        if (locations is Map && locations['features'] is List) {
+          return List<dynamic>.from(locations['features'] as List);
+        }
+        return [];
+      }
+      return [];
+    } catch (e) {
+      print('API: getMyRoute error: $e');
+      return [];
+    }
+  }
+
   /// Start Duty - record start time and location.
   /// Returns response data (start_time, session_id, date) on success, null on failure.
   /// POST /attendance/start-duty/

@@ -15,7 +15,8 @@ class AppConfig {
   // Location Tracking Configuration
   static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)
   /// Interval in seconds when duty is active (Start Duty). Location sent every N seconds.
-  static const int locationUpdateIntervalSecondsWhenDuty = 5;
+  /// Use 60–120 for better battery; lower values increase drain and heat.
+  static const int locationUpdateIntervalSecondsWhenDuty = 60;
   /// Interval in minutes to auto-refresh current location name on home screen.
   static const int placeNameRefreshMinutes = 15;
   static const double locationAccuracy = 10.0; // meters

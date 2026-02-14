@@ -746,8 +746,8 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: _buildActionButton(
               context,
-              title: "View Today's\nRoute",
-              subtitle: "See today's path",
+              title: "View Route",
+              subtitle: "Select date to view",
               icon: Icons.route_outlined,
               color: Colors.orange.shade700,
               onTap: () {

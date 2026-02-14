@@ -360,37 +360,12 @@ def employee_route(request):
             'message': 'Employee not found'
         }, status=status.HTTP_404_NOT_FOUND)
     
-    # Serialize and format locations for frontend
+    # Format locations for frontend (get_route_history already returns list of dicts)
     if route_data and 'locations' in route_data:
-        # Serialize the LocationLog queryset
-        from .serializers import LocationLogSerializer
-        location_serializer = LocationLogSerializer(route_data['locations'], many=True)
-        serialized_locations = location_serializer.data
-        
-        # Format for frontend (handle GeoJSON or regular format)
         formatted_locations = []
-        for loc in serialized_locations:
-            # Handle different location formats
-            lat = None
-            lng = None
-            
-            if 'latitude' in loc and 'longitude' in loc:
-                lat = loc['latitude']
-                lng = loc['longitude']
-            elif 'geometry' in loc and 'coordinates' in loc['geometry']:
-                # GeoJSON format: [longitude, latitude]
-                coords = loc['geometry']['coordinates']
-                lng = coords[0]
-                lat = coords[1]
-            elif 'location' in loc:
-                if isinstance(loc['location'], dict):
-                    lat = loc['location'].get('lat') or loc['location'].get('y')
-                    lng = loc['location'].get('lng') or loc['location'].get('x')
-                elif isinstance(loc['location'], list) and len(loc['location']) >= 2:
-                    # [lng, lat]
-                    lng = loc['location'][0]
-                    lat = loc['location'][1]
-            
+        for loc in route_data['locations']:
+            lat = loc.get('latitude')
+            lng = loc.get('longitude')
             if lat is not None and lng is not None:
                 formatted_locations.append({
                     'location': {
