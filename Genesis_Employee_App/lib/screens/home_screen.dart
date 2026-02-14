@@ -181,7 +181,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     int totalSeconds = _todayBaseSeconds;
     if (_dutyStartTime != null) {
-      totalSeconds += now.difference(_dutyStartTime!).inSeconds;
+      final liveSeconds = now.difference(_dutyStartTime!).inSeconds;
+      if (liveSeconds > 0) totalSeconds += liveSeconds;
       if (totalSeconds < 0) totalSeconds = 0;
     }
     final liveDuration = _formatDurationHMS(totalSeconds);
@@ -349,39 +350,64 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _showDutyLoadingDialog(BuildContext context, String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(message, style: Theme.of(ctx).textTheme.bodyLarge),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleTracking() async {
     final service = FlutterBackgroundService();
     final isRunning = await service.isRunning();
 
     if (isRunning) {
-      // End duty: get current position and send to backend, then stop tracking
+      // End duty: show loading, then get position, send to backend, stop tracking
+      if (mounted && context.mounted) {
+        _showDutyLoadingDialog(context, 'Ending duty...');
+      }
       try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        );
-        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-        await ApiService().endDuty(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          address: address,
-        );
-      } catch (_) {}
-      await _locationService.stopTracking();
-      if (mounted) {
-        setState(() {
-          _isTracking = false;
-          _dutyStartTime = null;
-        });
-        // Refetch today's attendance so duty time matches My Attendance (server start/end times)
-        await _loadTodayDutyTime();
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+          await ApiService().endDuty(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            address: address,
+          );
+        } catch (_) {}
+        await _locationService.stopTracking();
         if (mounted) {
           setState(() {
-            _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
+            _isTracking = false;
+            _dutyStartTime = null;
           });
+          await _loadTodayDutyTime();
+          if (mounted) {
+            setState(() {
+              _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
+            });
+          }
+        }
+      } finally {
+        if (mounted && context.mounted) {
+          Navigator.of(context).pop(context);
         }
       }
     } else {
-      // Start duty: ensure location permission first (required for foreground service on Android 14+)
+      // Start duty: ensure location permission first
       final hasLocation = await _locationService.requestLocationPermissionIfNeeded();
       if (!hasLocation && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -391,59 +417,69 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         return;
       }
-      // Optional: ensure notification permission for foreground notification (Android 13+)
       if (await Permission.notification.isDenied) {
         await Permission.notification.request();
       }
-      // Start duty: get current position, send to backend, then start tracking
-      Map<String, dynamic>? startData;
-      try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        );
-        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-        startData = await ApiService().startDuty(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          address: address,
-        );
-      } catch (_) {}
-      await _locationService.startTracking();
-      await Future.delayed(const Duration(seconds: 1));
-      final started = await service.isRunning();
-      if (mounted) {
-        DateTime? dutyStart;
-        if (started && startData != null) {
-          final startTimeStr = startData['start_time'] as String?;
-          if (startTimeStr != null && startTimeStr.isNotEmpty) {
-            try {
-              final dt = DateTime.parse(startTimeStr);
-              dutyStart = dt.isUtc ? dt.toLocal() : dt;
-            } catch (_) {}
-          }
-        }
-        setState(() {
-          _isTracking = started;
-          _dutyStartTime = dutyStart;
-        });
+      if (mounted && context.mounted) {
+        _showDutyLoadingDialog(context, 'Starting duty...');
       }
-      if (!started && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start tracking. Check permissions.')),
-        );
-      } else if (started && mounted) {
-        final hasBackground = await _locationService.hasBackgroundLocationPermission();
-        if (!hasBackground && mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
-              duration: Duration(seconds: 4),
-            ),
+      try {
+        Map<String, dynamic>? startData;
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
           );
+          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+          startData = await ApiService().startDuty(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            address: address,
+          );
+        } catch (_) {}
+        await _locationService.startTracking();
+        await Future.delayed(const Duration(seconds: 1));
+        final started = await service.isRunning();
+        if (mounted) {
+          DateTime? dutyStart;
+          if (started && startData != null) {
+            final startTimeStr = startData['start_time'] as String?;
+            if (startTimeStr != null && startTimeStr.isNotEmpty) {
+              try {
+                final dt = DateTime.parse(startTimeStr);
+                dutyStart = dt.isUtc ? dt.toLocal() : dt;
+              } catch (_) {}
+            }
+          }
+          if (dutyStart != null && dutyStart.isAfter(DateTime.now())) {
+            dutyStart = DateTime.now();
+          }
+          setState(() {
+            _isTracking = started;
+            _dutyStartTime = dutyStart;
+          });
         }
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) _fetchCurrentPlaceName();
-        });
+        if (!started && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+          );
+        } else if (started && mounted) {
+          final hasBackground = await _locationService.hasBackgroundLocationPermission();
+          if (!hasBackground && mounted && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          Future.delayed(const Duration(seconds: 2), () {
+            if (mounted) _fetchCurrentPlaceName();
+          });
+        }
+      } finally {
+        if (mounted && context.mounted) {
+          Navigator.of(context).pop(context);
+        }
       }
     }
   }
