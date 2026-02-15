@@ -28,6 +28,10 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   double _currentZoom = 13.0;
   /// Selected date for route; default today.
   DateTime _selectedDate = DateTime.now();
+  /// Start time for route filter (HH:mm:ss); default 00:00:00.
+  TimeOfDay _startTime = const TimeOfDay(hour: 0, minute: 0);
+  /// End time for route filter (HH:mm:ss); default 23:59:00.
+  TimeOfDay _endTime = const TimeOfDay(hour: 23, minute: 59);
   String? _loadError;
 
   void _zoomIn() {
@@ -71,16 +75,27 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
 
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
+    final startTimeStr = _timeOfDayToHhMmSs(_startTime);
+    final endTimeStr = _timeOfDayToHhMmSs(_endTime);
     final locations = await _apiService.getMyRoute(
       employeeId: employeeId,
       date: dateStr,
+      startTime: startTimeStr,
+      endTime: endTimeStr,
     );
     if (!mounted) return;
 
     // Process route: filter, dedupe, smooth; get points and distance for display
     final processed = processRouteForDisplay(locations);
     final points = processed.points;
-    final distance = processed.distanceKm;
+    double distance = processed.distanceKm;
+    if (points.length >= 2 && distance == 0) {
+      const distanceCalculator = Distance();
+      distance = 0.0;
+      for (int i = 0; i < points.length - 1; i++) {
+        distance += distanceCalculator.as(LengthUnit.Kilometer, points[i], points[i + 1]);
+      }
+    }
 
     // Build markers: only start and end
     List<Marker> markers = [];
@@ -141,6 +156,33 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
   }
   
+  /// Format TimeOfDay as HH:mm:ss for API.
+  String _timeOfDayToHhMmSs(TimeOfDay t) {
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}:00';
+  }
+
+  Future<void> _pickStartTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _startTime,
+    );
+    if (picked != null && mounted) {
+      setState(() => _startTime = picked);
+      _fetchRoute();
+    }
+  }
+
+  Future<void> _pickEndTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _endTime,
+    );
+    if (picked != null && mounted) {
+      setState(() => _endTime = picked);
+      _fetchRoute();
+    }
+  }
+
   /// Format ISO timestamp to time string (no BuildContext, safe after async).
   String _formatTimeIso(String isoString) {
     try {
@@ -207,41 +249,117 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             elevation: 1,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Date:',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  InkWell(
-                    onTap: _isLoading ? null : _pickDate,
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: colorScheme.outline),
+                  Row(
+                    children: [
+                      Text(
+                        'Date:',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      InkWell(
+                        onTap: _isLoading ? null : _pickDate,
                         borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.calendar_today, size: 20, color: colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            DateFormat('d MMM yyyy').format(_selectedDate),
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: colorScheme.onSurface,
-                            ),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: colorScheme.outline),
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          const SizedBox(width: 4),
-                          Icon(Icons.arrow_drop_down, color: colorScheme.onSurfaceVariant),
-                        ],
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.calendar_today, size: 20, color: colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(
+                                DateFormat('d MMM yyyy').format(_selectedDate),
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.arrow_drop_down, color: colorScheme.onSurfaceVariant),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Text(
+                        'From:',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: _isLoading ? null : _pickStartTime,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: colorScheme.outline),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.access_time, size: 18, color: colorScheme.primary),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${_startTime.hour.toString().padLeft(2, '0')}:${_startTime.minute.toString().padLeft(2, '0')}',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Text(
+                        'To:',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      InkWell(
+                        onTap: _isLoading ? null : _pickEndTime,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: colorScheme.outline),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.access_time, size: 18, color: colorScheme.primary),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${_endTime.hour.toString().padLeft(2, '0')}:${_endTime.minute.toString().padLeft(2, '0')}',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

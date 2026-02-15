@@ -1,8 +1,22 @@
 from rest_framework import serializers
 from decimal import Decimal
 from datetime import datetime, timedelta
-from .models import Attendance
+from django.utils import timezone
+from .models import Attendance, DutySession
 from employees.serializers import EmployeeProfileSerializer
+
+
+def _seconds_to_hhmmss(total_seconds):
+    """Convert total seconds to HH:MM:SS format."""
+    if total_seconds is None:
+        return '—'
+    try:
+        s = int(total_seconds)
+        hrs, remainder = divmod(s, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    except (TypeError, ValueError):
+        return '—'
 
 
 class AttendanceSerializer(serializers.ModelSerializer):
@@ -76,22 +90,33 @@ class AttendanceSerializer(serializers.ModelSerializer):
 
 class AttendanceReportSerializer(serializers.ModelSerializer):
     """
-    Detailed attendance report with employee details
+    Detailed attendance report with employee details.
+    When context['include_sessions']=True, adds sessions and DutySession-derived times.
     """
     employee_details = EmployeeProfileSerializer(source='employee', read_only=True)
+    employee_name = serializers.CharField(source='employee.name', read_only=True)
+    employee_id = serializers.CharField(source='employee.employee_id', read_only=True)
     duration_hours = serializers.SerializerMethodField()
     location_tracking_quality = serializers.SerializerMethodField()
     is_complete = serializers.SerializerMethodField()
     is_overtime = serializers.SerializerMethodField()
-    
+    sessions = serializers.SerializerMethodField()
+    check_in_time_str = serializers.SerializerMethodField()
+    check_out_time_str = serializers.SerializerMethodField()
+    total_hours_str = serializers.SerializerMethodField()
+    duty_status = serializers.SerializerMethodField()
+
     class Meta:
         model = Attendance
         fields = [
-            'id', 'employee', 'employee_details', 'date', 'status',
+            'id', 'employee', 'employee_details', 'employee_name', 'employee_id',
+            'date', 'status',
             'first_location_time', 'last_location_time',
             'check_in_time', 'check_out_time', 'total_hours',
             'duration_hours', 'total_locations_logged',
             'location_tracking_quality', 'is_complete', 'is_overtime',
+            'sessions', 'check_in_time_str', 'check_out_time_str', 'total_hours_str',
+            'duty_status',
             'remarks', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -131,6 +156,71 @@ class AttendanceReportSerializer(serializers.ModelSerializer):
     def get_is_overtime(self, obj):
         """Check if employee worked overtime (>8 hours)"""
         return obj.total_hours > Decimal('8.00') if obj.total_hours else False
+
+    def _get_session_data(self, obj):
+        """Return (sessions_list, check_in_str, check_out_str, total_seconds) from DutySessions."""
+        if not self.context.get('include_sessions'):
+            return [], None, None, 0
+        cache_key = (obj.pk, str(obj.date))
+        if not hasattr(self, '_session_data_cache'):
+            self._session_data_cache = {}
+        if cache_key in self._session_data_cache:
+            return self._session_data_cache[cache_key]
+        sessions_qs = DutySession.objects.filter(
+            employee=obj.employee, date=obj.date, end_time__isnull=False
+        ).order_by('start_time')
+        sessions_list = []
+        total_seconds = 0
+        first_sess = None
+        last_sess = None
+        for sess in sessions_qs:
+            delta_secs = int((sess.end_time - sess.start_time).total_seconds()) if sess.end_time else 0
+            total_seconds += delta_secs
+            if first_sess is None:
+                first_sess = sess
+            last_sess = sess
+            sessions_list.append({
+                'start_time': timezone.localtime(sess.start_time).strftime('%I:%M:%S %p'),
+                'end_time': timezone.localtime(sess.end_time).strftime('%I:%M:%S %p') if sess.end_time else None,
+                'start_location': sess.start_address or f"{sess.start_latitude}, {sess.start_longitude}",
+                'end_location': (sess.end_address or f"{sess.end_latitude}, {sess.end_longitude}") if sess.end_time else None,
+                'duration_seconds': delta_secs,
+            })
+        check_in_str = timezone.localtime(first_sess.start_time).strftime('%I:%M:%S %p') if first_sess else None
+        check_out_str = timezone.localtime(last_sess.end_time).strftime('%I:%M:%S %p') if last_sess and last_sess.end_time else None
+        result = (sessions_list, check_in_str, check_out_str, total_seconds)
+        self._session_data_cache[cache_key] = result
+        return result
+
+    def get_sessions(self, obj):
+        sessions_list, _, _, _ = self._get_session_data(obj)
+        return sessions_list
+
+    def get_check_in_time_str(self, obj):
+        _, check_in_str, _, _ = self._get_session_data(obj)
+        return check_in_str
+
+    def get_check_out_time_str(self, obj):
+        _, _, check_out_str, _ = self._get_session_data(obj)
+        return check_out_str
+
+    def get_total_hours_str(self, obj):
+        _, _, _, total_seconds = self._get_session_data(obj)
+        return _seconds_to_hhmmss(total_seconds) if total_seconds else None
+
+    def get_duty_status(self, obj):
+        """Return on_duty, off_duty, or absent (matches dashboard logic from DutySession)."""
+        has_open = DutySession.objects.filter(
+            employee=obj.employee, date=obj.date, end_time__isnull=True
+        ).exists()
+        if has_open:
+            return 'on_duty'
+        has_closed = DutySession.objects.filter(
+            employee=obj.employee, date=obj.date, end_time__isnull=False
+        ).exists()
+        if has_closed:
+            return 'off_duty'
+        return 'absent'
 
 
 class DailyAttendanceSummarySerializer(serializers.Serializer):

@@ -1,0 +1,65 @@
+{% if employees %}
+<div class="table-responsive">
+    <table class="table table-hover align-middle">
+        <thead class="table-light">
+            <tr>
+                <th>Name</th>
+                <th>Employee ID</th>
+                <th>Department</th>
+                {% if filter_type == 'total' %}
+                <th>Designation</th>
+                <th>Email</th>
+                <th>Phone</th>
+                {% elif filter_type == 'on_duty' %}
+                <th>Start Time</th>
+                <th>Present Location</th>
+                <th>Speed</th>
+                <th>Current Duty Hours</th>
+                {% elif filter_type == 'off_duty' %}
+                <th>Start Time</th>
+                <th>End Time</th>
+                <th>End Location</th>
+                <th>Speed</th>
+                <th>Total Duty Hours</th>
+                {% elif filter_type == 'absent' %}
+                <th>Designation</th>
+                <th>Email</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for emp in employees %}
+            <tr>
+                <td><strong>{{ emp.name }}</strong></td>
+                <td><small class="text-muted">{{ emp.employee_id }}</small></td>
+                <td>{{ emp.department }}</td>
+                {% if filter_type == 'total' %}
+                <td>{{ emp.designation }}</td>
+                <td>{{ emp.email }}</td>
+                <td>{{ emp.phone }}</td>
+                {% elif filter_type == 'on_duty' %}
+                <td>{{ emp.start_time }}</td>
+                <td><small>{{ emp.present_location }}</small></td>
+                <td>{{ emp.speed }}</td>
+                <td><strong>{{ emp.current_duty_hours }}</strong></td>
+                {% elif filter_type == 'off_duty' %}
+                <td>{{ emp.start_time }}</td>
+                <td>{{ emp.end_time }}</td>
+                <td><small>{{ emp.end_location }}</small></td>
+                <td>{{ emp.speed }}</td>
+                <td><strong>{{ emp.total_duty_hours }}</strong></td>
+                {% elif filter_type == 'absent' %}
+                <td>{{ emp.designation }}</td>
+                <td>{{ emp.email }}</td>
+                {% endif %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="text-muted small mb-0"><strong>{{ employees|length }}</strong> employee{{ employees|length|pluralize }}</p>
+{% else %}
+<div class="alert alert-info mb-0">
+    <i class="fas fa-info-circle me-2"></i>No employees in this category for {{ selected_date|date:"M d, Y" }}.
+</div>
+{% endif %}

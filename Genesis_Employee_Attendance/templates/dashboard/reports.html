@@ -38,6 +38,31 @@
         position: relative;
         height: 300px;
     }
+    .employee-multiselect-dropdown {
+        min-width: 280px;
+        max-height: 320px;
+        overflow-y: auto;
+    }
+    .employee-multiselect-dropdown .form-check {
+        padding: 0.4rem 1rem;
+    }
+    .employee-multiselect-dropdown .form-check:hover {
+        background-color: rgba(37, 99, 235, 0.06);
+    }
+    .employee-multiselect-trigger {
+        min-height: 38px;
+        text-align: left;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.5rem;
+    }
+    .employee-multiselect-trigger .trigger-text {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 </style>
 {% endblock %}
 
@@ -50,34 +75,49 @@
 
 <!-- Filters -->
 <div class="report-filters">
-    <div class="row g-3">
-        <div class="col-md-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-6 col-sm-4 col-md-2">
+            <label class="form-label">Report Type</label>
+            <select class="form-select" id="reportTypeSelect">
+                <option value="session" selected>Attendance Session</option>
+                <option value="summary">Attendance Summary</option>
+            </select>
+        </div>
+        <div class="col-6 col-sm-4 col-md-2">
             <label class="form-label">Date Range</label>
             <input type="date" class="form-control" id="startDate" value="{{ today|date:'Y-m-d' }}">
         </div>
-        
-        <div class="col-md-3">
+        <div class="col-6 col-sm-4 col-md-2">
             <label class="form-label">End Date</label>
             <input type="date" class="form-control" id="endDate" value="{{ today|date:'Y-m-d' }}">
         </div>
-        
-        <div class="col-md-2">
+        <div class="col-6 col-sm-4 col-md-2">
             <label class="form-label">Department</label>
             <select class="form-select" id="departmentSelect">
                 <option value="">All Departments</option>
-                <!-- Populated via JavaScript -->
+                {% for dept in departments %}
+                <option value="{{ dept }}">{{ dept }}</option>
+                {% endfor %}
             </select>
         </div>
-        
-        <div class="col-md-2">
+        <div class="col-6 col-sm-4 col-md-2">
             <label class="form-label">Employee</label>
-            <select class="form-select" id="employeeSelect">
-                <option value="">All Employees</option>
-                <!-- Populated via JavaScript -->
-            </select>
+            <div class="dropdown" id="employeeDropdown">
+                <button class="form-select employee-multiselect-trigger dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false" id="employeeDropdownBtn">
+                    <span class="trigger-text" id="employeeTriggerText">All Employees</span>
+                </button>
+                <ul class="dropdown-menu employee-multiselect-dropdown py-0" id="employeeDropdownMenu">
+                    <li class="px-2 py-2 border-bottom bg-light">
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="employeeSelectAll">Select All</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="employeeClearAll">Clear All</button>
+                        </div>
+                    </li>
+                    <li><div id="employeeCheckboxList" class="px-2 py-2"></div></li>
+                </ul>
+            </div>
         </div>
-        
-        <div class="col-md-2 d-flex align-items-end">
+        <div class="col-6 col-sm-4 col-md-2 d-flex align-items-end">
             <button class="btn btn-primary w-100" onclick="loadReport()">
                 <i class="fas fa-search me-2"></i>Generate
             </button>
@@ -101,45 +141,51 @@
     </div>
 </div>
 
-<!-- Summary Cards -->
+<!-- Summary Cards (context-aware: Session shows Total Sessions, Summary shows Total Hours) -->
 <div class="row g-4 mb-4">
-    <div class="col-md-3">
+    <div class="col-6 col-lg">
+        <div class="stat-card">
+            <div class="icon" style="background: rgba(37, 99, 235, 0.1); color: var(--primary);">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="value" id="summaryTotal">0</div>
+            <div class="label">Total Records</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg" id="summaryContextCardWrapper">
+        <div class="stat-card">
+            <div class="icon" id="summaryContextIcon" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+                <i class="fas fa-layer-group" id="summaryContextIconFa"></i>
+            </div>
+            <div class="value" id="summaryContextValue">0</div>
+            <div class="label" id="summaryContextLabel">Total Sessions</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg">
         <div class="stat-card">
             <div class="icon" style="background: rgba(16, 185, 129, 0.1); color: var(--success);">
                 <i class="fas fa-check-circle"></i>
             </div>
-            <div class="value" id="summaryPresent">0</div>
-            <div class="label">Total Present</div>
+            <div class="value" id="summaryOnDuty">0</div>
+            <div class="label">On Duty</div>
         </div>
     </div>
-    
-    <div class="col-md-3">
+    <div class="col-6 col-lg">
         <div class="stat-card">
             <div class="icon" style="background: rgba(245, 158, 11, 0.1); color: var(--warning);">
                 <i class="fas fa-clock"></i>
             </div>
-            <div class="value" id="summaryLate">0</div>
-            <div class="label">Total Late</div>
+            <div class="value" id="summaryOffDuty">0</div>
+            <div class="label">Off Duty</div>
         </div>
     </div>
-    
-    <div class="col-md-3">
+    <div class="col-6 col-lg">
         <div class="stat-card">
             <div class="icon" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">
                 <i class="fas fa-times-circle"></i>
             </div>
             <div class="value" id="summaryAbsent">0</div>
-            <div class="label">Total Absent</div>
-        </div>
-    </div>
-    
-    <div class="col-md-3">
-        <div class="stat-card">
-            <div class="icon" style="background: rgba(37, 99, 235, 0.1); color: var(--primary);">
-                <i class="fas fa-percentage"></i>
-            </div>
-            <div class="value" id="summaryRate">0%</div>
-            <div class="label">Attendance Rate</div>
+            <div class="label">Absent</div>
         </div>
     </div>
 </div>
@@ -181,21 +227,12 @@
             
             <div class="table-responsive">
                 <table class="table table-hover align-middle mb-0" id="attendanceTable">
-                    <thead>
-                        <tr>
-                            <th>Employee</th>
-                            <th>Date</th>
-                            <th>Check In</th>
-                            <th>Check Out</th>
-                            <th>Hours</th>
-                            <th>Locations</th>
-                            <th>Status</th>
-                            <th>Remarks</th>
-                        </tr>
+                    <thead id="attendanceTableHead">
+                        <tr><th>Serial</th><th>Employee</th><th>Date</th><th>Session No</th><th>Start Time</th><th>End Time</th><th>Session Duration</th><th>Start Location</th><th>End Location</th></tr>
                     </thead>
                     <tbody id="attendanceTableBody">
                         <tr>
-                            <td colspan="8" class="text-center py-5 text-muted">
+                            <td colspan="9" class="text-center py-5 text-muted">
                                 <i class="fas fa-info-circle fa-2x mb-2"></i>
                                 <p>Select filters and click "Generate" to view reports</p>
                             </td>
@@ -222,12 +259,87 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 <script>
+    const ALL_EMPLOYEES = {{ employees_json|safe }};
+    let selectedEmployeeIds = [];
+    let filteredEmployees = [];
     let trendChart;
     let distributionChart;
     let reportData = [];
     let currentPage = 1;
+    let reportType = 'session';  // 'session' or 'summary'
+    let hasReportBeenGenerated = false;
     const itemsPerPage = 20;
+    
+    // Format time string to 12-hour with AM/PM (e.g. "02:30:45 PM")
+    function formatTimeTo12H(t) {
+        if (t == null || t === '') return '—';
+        const match = String(t).match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+        if (match) {
+            const hour = parseInt(match[1], 10);
+            const min = parseInt(match[2], 10);
+            const sec = parseInt(match[3] || '0', 10);
+            const date = new Date(2000, 0, 1, hour, min, sec);
+            return date.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
+        return t;
+    }
+    
+    // Format decimal hours to HH:MM:SS
+    function formatHoursToHMS(hours) {
+        if (hours == null || hours === '' || isNaN(parseFloat(hours))) return '—';
+        const h = parseFloat(hours);
+        const totalSecs = Math.round(h * 3600);
+        const hrs = Math.floor(totalSecs / 3600);
+        const mins = Math.floor((totalSecs % 3600) / 60);
+        const secs = totalSecs % 60;
+        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+
+    // Format duration_seconds to HH:MM:SS
+    function formatDurationSeconds(secs) {
+        if (secs == null || isNaN(parseInt(secs))) return '—';
+        const s = parseInt(secs);
+        const hrs = Math.floor(s / 3600);
+        const mins = Math.floor((s % 3600) / 60);
+        const sec = s % 60;
+        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    }
+
+    // Resolve display time (prefer API-derived 12h string, fallback to formatTimeTo12H)
+    function getCheckInDisplay(r) {
+        return r.check_in_time_str || formatTimeTo12H(r.check_in_time) || '—';
+    }
+    function getCheckOutDisplay(r) {
+        return r.check_out_time_str || formatTimeTo12H(r.check_out_time) || '—';
+    }
+    function getTotalHoursDisplay(r) {
+        return r.total_hours_str || formatHoursToHMS(r.total_hours) || '—';
+    }
+
+    function getTotalSessionsCount() {
+        let count = 0;
+        reportData.forEach(r => {
+            const sessions = r.sessions || [];
+            count += sessions.length;
+        });
+        return count;
+    }
+
+    function getTotalHoursSeconds() {
+        let total = 0;
+        reportData.forEach(r => {
+            const sessions = r.sessions || [];
+            if (sessions.length > 0) {
+                sessions.forEach(s => { total += s.duration_seconds || 0; });
+            } else if (r.total_hours != null) {
+                total += Math.round(parseFloat(r.total_hours) * 3600);
+            }
+        });
+        return total;
+    }
     
     // Initialize charts
     function initCharts() {
@@ -238,14 +350,14 @@
             data: {
                 labels: [],
                 datasets: [{
-                    label: 'Present',
+                    label: 'On Duty',
                     data: [],
                     borderColor: '#10b981',
                     backgroundColor: 'rgba(16, 185, 129, 0.1)',
                     tension: 0.4,
                     fill: true
                 }, {
-                    label: 'Late',
+                    label: 'Off Duty',
                     data: [],
                     borderColor: '#f59e0b',
                     backgroundColor: 'rgba(245, 158, 11, 0.1)',
@@ -281,10 +393,10 @@
         distributionChart = new Chart(distCtx, {
             type: 'doughnut',
             data: {
-                labels: ['Present', 'Late', 'Half Day', 'Absent'],
+                labels: ['On Duty', 'Off Duty', 'Absent'],
                 datasets: [{
-                    data: [0, 0, 0, 0],
-                    backgroundColor: ['#10b981', '#f59e0b', '#3b82f6', '#ef4444'],
+                    data: [0, 0, 0],
+                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
                     borderWidth: 2,
                     borderColor: '#fff'
                 }]
@@ -301,61 +413,115 @@
         });
     }
     
-    // Load employees and departments
-    function loadFilters() {
-        fetch('/api/employees/', {
-            method: 'GET',
-            headers: getAuthHeaders(),
-            credentials: 'same-origin'
-        })
-        .then(response => response.json())
-        .then(data => {
-            const empSelect = document.getElementById('employeeSelect');
-            const deptSelect = document.getElementById('departmentSelect');
-            const departments = new Set();
-            
-            if (data.results) {
-                data.results.forEach(emp => {
-                    // Add employee
-                    const option = document.createElement('option');
-                    option.value = emp.id;
-                    option.textContent = `${emp.name} (${emp.employee_id})`;
-                    empSelect.appendChild(option);
-                    
-                    // Collect departments
-                    if (emp.department) {
-                        departments.add(emp.department);
-                    }
-                });
-            }
-            
-            // Add departments
-            departments.forEach(dept => {
-                const option = document.createElement('option');
-                option.value = dept;
-                option.textContent = dept;
-                deptSelect.appendChild(option);
+    function updateEmployeeTriggerDisplay() {
+        const textEl = document.getElementById('employeeTriggerText');
+        if (selectedEmployeeIds.length === 0) {
+            textEl.textContent = 'All Employees';
+            return;
+        }
+        if (selectedEmployeeIds.length <= 2) {
+            const names = selectedEmployeeIds.map(id => {
+                const emp = filteredEmployees.find(e => String(e.id) === String(id));
+                return emp ? (emp.name || emp.employee_id || id) : id;
             });
-        })
-        .catch(error => console.error('Error loading filters:', error));
+            textEl.textContent = names.join(', ');
+        } else {
+            const strong = document.createElement('strong');
+            strong.textContent = selectedEmployeeIds.length + ' Employees Selected';
+            textEl.innerHTML = '';
+            textEl.appendChild(strong);
+        }
+    }
+
+    function renderEmployeeCheckboxes() {
+        const container = document.getElementById('employeeCheckboxList');
+        container.innerHTML = '';
+        if (filteredEmployees.length === 0) {
+            container.innerHTML = '<div class="text-muted small py-2">No employees in selected department</div>';
+            return;
+        }
+        filteredEmployees.forEach((emp, idx) => {
+            const id = String(emp.id);
+            const label = (emp.name || '') + ' (' + (emp.employee_id || '') + ')';
+            const div = document.createElement('div');
+            div.className = 'form-check';
+            const checkbox = document.createElement('input');
+            checkbox.className = 'form-check-input employee-checkbox';
+            checkbox.type = 'checkbox';
+            checkbox.value = id;
+            checkbox.id = 'emp_cb_' + idx;
+            const labelEl = document.createElement('label');
+            labelEl.className = 'form-check-label w-100';
+            labelEl.htmlFor = checkbox.id;
+            labelEl.textContent = label;
+            div.appendChild(checkbox);
+            div.appendChild(labelEl);
+            const cb = div.querySelector('input');
+            cb.checked = selectedEmployeeIds.includes(id);
+            cb.addEventListener('change', function() {
+                if (this.checked) {
+                    if (!selectedEmployeeIds.includes(id)) selectedEmployeeIds.push(id);
+                } else {
+                    selectedEmployeeIds = selectedEmployeeIds.filter(x => x !== id);
+                }
+                updateEmployeeTriggerDisplay();
+            });
+            container.appendChild(div);
+        });
+    }
+
+    function loadEmployeesByDepartment() {
+        const department = document.getElementById('departmentSelect').value;
+        selectedEmployeeIds = [];
+        const employees = Array.isArray(ALL_EMPLOYEES) ? ALL_EMPLOYEES : [];
+        filteredEmployees = department
+            ? employees.filter(emp => emp.department === department)
+            : employees;
+        renderEmployeeCheckboxes();
+        updateEmployeeTriggerDisplay();
+    }
+
+    function employeeSelectAll() {
+        selectedEmployeeIds = filteredEmployees.map(e => String(e.id));
+        document.querySelectorAll('#employeeCheckboxList .employee-checkbox').forEach(cb => {
+            cb.checked = true;
+        });
+        updateEmployeeTriggerDisplay();
+    }
+
+    function employeeClearAll() {
+        selectedEmployeeIds = [];
+        document.querySelectorAll('#employeeCheckboxList .employee-checkbox').forEach(cb => {
+            cb.checked = false;
+        });
+        updateEmployeeTriggerDisplay();
+    }
+
+    function loadFilters() {
+        document.getElementById('departmentSelect').addEventListener('change', loadEmployeesByDepartment);
+        document.getElementById('employeeSelectAll').addEventListener('click', employeeSelectAll);
+        document.getElementById('employeeClearAll').addEventListener('click', employeeClearAll);
+        loadEmployeesByDepartment();
     }
     
     // Load report data
     function loadReport() {
+        syncReportType();
         const startDate = document.getElementById('startDate').value;
         const endDate = document.getElementById('endDate').value;
         const department = document.getElementById('departmentSelect').value;
-        const employeeId = document.getElementById('employeeSelect').value;
         
         if (!startDate || !endDate) {
             showAlert('Please select a date range.', 'warning');
             return;
         }
         
-        // Use the all-attendance endpoint with filters for better compatibility
-        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}`;
+        // Use the all-attendance endpoint with filters; include_sessions=1 for both (Summary needs locations)
+        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}&include_sessions=1&page_size=500`;
         if (department) url += `&department=${department}`;
-        if (employeeId) url += `&employee_id=${employeeId}`;
+        if (selectedEmployeeIds.length > 0) {
+            selectedEmployeeIds.forEach(id => { url += `&employee_id=${encodeURIComponent(id)}`; });
+        }
         
         fetch(url, {
             method: 'GET',
@@ -364,16 +530,17 @@
         })
         .then(response => response.json())
         .then(data => {
-            // Handle different response formats
+            // Handle different response formats (including paginated)
             if (data.success && data.data) {
                 reportData = Array.isArray(data.data) ? data.data : (data.data.results || []);
             } else if (data.results) {
-                reportData = data.results;
+                reportData = Array.isArray(data.results) ? data.results : (data.results.data || []);
             } else if (Array.isArray(data)) {
                 reportData = data;
             } else {
                 reportData = [];
             }
+            hasReportBeenGenerated = true;
             updateSummary();
             updateCharts();
             displayTable();
@@ -384,198 +551,379 @@
         });
     }
     
-    // Update summary cards
+    // Update summary cards (duty-based + context-aware: Total Sessions / Total Hours)
     function updateSummary() {
-        const present = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'PRESENT' || status === 'LATE' || status === 'HALF_DAY';
-        }).length;
-        const late = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'LATE';
-        }).length;
-        const absent = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'ABSENT';
-        }).length;
+        syncReportType();
+        const dutyStatus = (r) => r.duty_status || (r.status === 'ABSENT' ? 'absent' : (r.status === 'LATE' || r.status === 'PRESENT' || r.status === 'HALF_DAY' ? 'off_duty' : 'absent'));
+        const onDuty = reportData.filter(r => dutyStatus(r) === 'on_duty').length;
+        const offDuty = reportData.filter(r => dutyStatus(r) === 'off_duty').length;
+        const absent = reportData.filter(r => dutyStatus(r) === 'absent').length;
         const total = reportData.length;
-        const rate = total > 0 ? ((present / total) * 100).toFixed(1) : 0;
-        
-        document.getElementById('summaryPresent').textContent = present;
-        document.getElementById('summaryLate').textContent = late;
+
+        document.getElementById('summaryTotal').textContent = total;
+        document.getElementById('summaryOnDuty').textContent = onDuty;
+        document.getElementById('summaryOffDuty').textContent = offDuty;
         document.getElementById('summaryAbsent').textContent = absent;
-        document.getElementById('summaryRate').textContent = rate + '%';
+
+        const ctxLabel = document.getElementById('summaryContextLabel');
+        const ctxValue = document.getElementById('summaryContextValue');
+        const ctxIcon = document.getElementById('summaryContextIcon');
+        const ctxIconFa = document.getElementById('summaryContextIconFa');
+        if (reportType === 'session') {
+            ctxLabel.textContent = 'Total Sessions';
+            ctxValue.textContent = getTotalSessionsCount();
+            ctxIcon.style.background = 'rgba(99, 102, 241, 0.1)';
+            ctxIcon.style.color = '#6366f1';
+            ctxIconFa.className = 'fas fa-layer-group';
+        } else {
+            ctxLabel.textContent = 'Total Hours';
+            const totalSecs = getTotalHoursSeconds();
+            ctxValue.textContent = totalSecs > 0 ? formatDurationSeconds(totalSecs) : '0';
+            ctxIcon.style.background = 'rgba(99, 102, 241, 0.1)';
+            ctxIcon.style.color = '#6366f1';
+            ctxIconFa.className = 'fas fa-clock';
+        }
     }
     
-    // Update charts
+    // Update charts (duty-based: on_duty, off_duty, absent)
     function updateCharts() {
+        const dutyStatus = (r) => r.duty_status || (r.status === 'ABSENT' ? 'absent' : 'off_duty');
+
         // Group by date
         const dateGroups = {};
         reportData.forEach(record => {
             const date = record.date || (record.employee_details && record.employee_details.date);
-            const status = record.status || (record.employee_details && record.employee_details.status);
             if (!date) return;
-            
             if (!dateGroups[date]) {
-                dateGroups[date] = { present: 0, late: 0, absent: 0 };
+                dateGroups[date] = { on_duty: 0, off_duty: 0, absent: 0 };
             }
-            if (status === 'PRESENT' || status === 'HALF_DAY') {
-                dateGroups[date].present++;
-            } else if (status === 'LATE') {
-                dateGroups[date].late++;
-            } else if (status === 'ABSENT') {
-                dateGroups[date].absent++;
-            }
+            const ds = dutyStatus(record);
+            dateGroups[date][ds]++;
         });
-        
+
         const dates = Object.keys(dateGroups).sort();
-        const presentData = dates.map(d => dateGroups[d].present);
-        const lateData = dates.map(d => dateGroups[d].late);
+        const onDutyData = dates.map(d => dateGroups[d].on_duty);
+        const offDutyData = dates.map(d => dateGroups[d].off_duty);
         const absentData = dates.map(d => dateGroups[d].absent);
-        
+
         trendChart.data.labels = dates;
-        trendChart.data.datasets[0].data = presentData;
-        trendChart.data.datasets[1].data = lateData;
+        trendChart.data.datasets[0].data = onDutyData;
+        trendChart.data.datasets[1].data = offDutyData;
         trendChart.data.datasets[2].data = absentData;
         trendChart.update();
-        
-        // Update distribution
-        const present = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'PRESENT';
-        }).length;
-        const late = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'LATE';
-        }).length;
-        const halfDay = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'HALF_DAY';
-        }).length;
-        const absent = reportData.filter(r => {
-            const status = r.status || (r.employee_details && r.employee_details.status);
-            return status === 'ABSENT';
-        }).length;
-        
-        distributionChart.data.datasets[0].data = [present, late, halfDay, absent];
+
+        // Distribution (on_duty, off_duty, absent)
+        const onDuty = reportData.filter(r => dutyStatus(r) === 'on_duty').length;
+        const offDuty = reportData.filter(r => dutyStatus(r) === 'off_duty').length;
+        const absent = reportData.filter(r => dutyStatus(r) === 'absent').length;
+
+        distributionChart.data.datasets[0].data = [onDuty, offDuty, absent];
         distributionChart.update();
     }
     
-    // Display table
+    // Update table header based on report type
+    function updateTableHeader() {
+        const thead = document.getElementById('attendanceTableHead');
+        if (reportType === 'session') {
+            thead.innerHTML = '<tr><th>Serial</th><th>Employee</th><th>Date</th><th>Session No</th><th>Start Time</th><th>End Time</th><th>Session Duration</th><th>Start Location</th><th>End Location</th></tr>';
+        } else {
+            thead.innerHTML = '<tr><th>Serial</th><th>Employee</th><th>Date</th><th>Check In</th><th>Check Out</th><th>Today\'s Duty Time</th><th>Check In Location</th><th>Check Out Location</th></tr>';
+        }
+    }
+
+    function getSummaryLocations(r) {
+        const sessions = r.sessions || [];
+        const first = sessions[0];
+        const last = sessions.length > 0 ? sessions[sessions.length - 1] : null;
+        return {
+            checkInLoc: first ? (first.start_location || '—') : '—',
+            checkOutLoc: last ? (last.end_location || '—') : '—'
+        };
+    }
+
+    // Group reportData by (employee, date) for session report
+    function groupByEmployeeDate(data) {
+        const groups = [];
+        const seen = new Set();
+        data.forEach(r => {
+            const empId = r.employee || (r.employee_details && r.employee_details.id) || '';
+            const date = r.date || '';
+            const key = empId + '|' + date;
+            if (seen.has(key)) return;
+            seen.add(key);
+            groups.push(r);
+        });
+        return groups;
+    }
+
+    // Display table (session: merged with rowspan; summary: merged by employee)
     function displayTable() {
+        syncReportType();
+        updateTableHeader();
         const tbody = document.getElementById('attendanceTableBody');
-        const totalPages = Math.ceil(reportData.length / itemsPerPage);
-        const start = (currentPage - 1) * itemsPerPage;
-        const end = start + itemsPerPage;
-        const pageData = reportData.slice(start, end);
-        
-        if (pageData.length === 0) {
+
+        if (reportData.length === 0) {
+            const colCount = reportType === 'session' ? 9 : 8;
+            const emptyMsg = hasReportBeenGenerated
+                ? 'No attendance records found'
+                : 'Select filters and click "Generate" to view reports';
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="8" class="text-center py-5 text-muted">
+                    <td colspan="${colCount}" class="text-center py-5 text-muted">
                         <i class="fas fa-info-circle fa-2x mb-2"></i>
-                        <p>No attendance records found</p>
+                        <p>${emptyMsg}</p>
                     </td>
                 </tr>
             `;
+            document.getElementById('recordCount').textContent = '0';
+            document.getElementById('pagination').innerHTML = '';
             return;
         }
-        
+
         let html = '';
-        pageData.forEach(record => {
-            const statusClass = {
-                'PRESENT': 'bg-success',
-                'LATE': 'bg-warning',
-                'HALF_DAY': 'bg-info',
-                'ABSENT': 'bg-danger'
-            }[record.status] || 'bg-secondary';
-            
-            const empDetails = record.employee_details || {};
-            const empName = record.employee_name || empDetails.name || 'N/A';
-            const empId = record.employee_id || empDetails.employee_id || '';
-            const status = record.status || 'N/A';
-            
-            html += `
-                <tr>
-                    <td>
-                        <div>
-                            <strong>${empName}</strong><br>
-                            <small class="text-muted">${empId}</small>
-                        </div>
-                    </td>
-                    <td>${record.date ? new Date(record.date).toLocaleDateString() : '—'}</td>
-                    <td>${record.check_in_time || '—'}</td>
-                    <td>${record.check_out_time || '—'}</td>
-                    <td>${record.total_hours || '—'}</td>
-                    <td><span class="badge bg-secondary">${record.total_locations_logged || 0}</span></td>
-                    <td><span class="status-badge ${statusClass}">${status}</span></td>
-                    <td><small class="text-muted">${record.remarks || '—'}</small></td>
-                </tr>
-            `;
-        });
-        
+        let recordCount = 0;
+
+        if (reportType === 'session') {
+            const groups = groupByEmployeeDate(reportData);
+            let serial = 1;
+            groups.forEach(record => {
+                const empDetails = record.employee_details || {};
+                const empName = record.employee_name || empDetails.name || 'N/A';
+                const empId = record.employee_id || empDetails.employee_id || '';
+                const dateStr = record.date ? new Date(record.date).toLocaleDateString() : '—';
+                const sessions = record.sessions || [];
+
+                let totalSecs = 0;
+                sessions.forEach(s => { totalSecs += (s.duration_seconds || 0); });
+                const rowCount = sessions.length + (sessions.length > 0 ? 1 : 0);
+                const rowspan = Math.max(1, rowCount);
+
+                if (sessions.length === 0) {
+                    html += `
+                        <tr>
+                            <td>${serial}</td>
+                            <td><strong>${empName}</strong><br><small class="text-muted">${empId}</small></td>
+                            <td>${dateStr}</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                    `;
+                    recordCount++;
+                } else {
+                    const firstSess = sessions[0];
+                    const lastSess = sessions[sessions.length - 1];
+                    const firstStart = firstSess.start_time || '—';
+                    const lastEnd = lastSess.end_time || '—';
+                    const firstLoc = firstSess.start_location || '—';
+                    const lastLoc = lastSess.end_location || '—';
+
+                    sessions.forEach((sess, idx) => {
+                        const isFirst = idx === 0;
+                        const merged = isFirst ? `<td rowspan="${rowspan}">${serial}</td><td rowspan="${rowspan}"><strong>${empName}</strong><br><small class="text-muted">${empId}</small></td><td rowspan="${rowspan}">${dateStr}</td>` : '';
+                        html += `
+                            <tr>
+                                ${merged}
+                                <td>${idx + 1}</td>
+                                <td>${sess.start_time || '—'}</td>
+                                <td>${sess.end_time || '—'}</td>
+                                <td>${formatDurationSeconds(sess.duration_seconds)}</td>
+                                <td><small>${(sess.start_location || '—').substring(0, 50)}${(sess.start_location || '').length > 50 ? '...' : ''}</small></td>
+                                <td><small>${(sess.end_location || '—').substring(0, 50)}${(sess.end_location || '').length > 50 ? '...' : ''}</small></td>
+                            </tr>
+                        `;
+                        recordCount++;
+                    });
+                    html += `
+                        <tr>
+                            <td>Today's Duty Time</td>
+                            <td>${firstStart}</td>
+                            <td>${lastEnd}</td>
+                            <td>${formatDurationSeconds(totalSecs)}</td>
+                            <td><small>${(firstLoc || '—').substring(0, 50)}${(firstLoc || '').length > 50 ? '...' : ''}</small></td>
+                            <td><small>${(lastLoc || '—').substring(0, 50)}${(lastLoc || '').length > 50 ? '...' : ''}</small></td>
+                        </tr>
+                    `;
+                    recordCount++;
+                }
+                serial++;
+            });
+        } else {
+            const groupedByEmp = {};
+            reportData.forEach(r => {
+                const empId = r.employee || (r.employee_details && r.employee_details.id) || 'x';
+                const empName = r.employee_name || (r.employee_details && r.employee_details.name) || 'N/A';
+                const empIdStr = r.employee_id || (r.employee_details && r.employee_details.employee_id) || '';
+                if (!groupedByEmp[empId]) {
+                    groupedByEmp[empId] = { name: empName, empIdStr, rows: [] };
+                }
+                groupedByEmp[empId].rows.push(r);
+            });
+            let serial = 1;
+            Object.keys(groupedByEmp).forEach(eid => {
+                const g = groupedByEmp[eid];
+                const rowspan = g.rows.length;
+                g.rows.forEach((r, idx) => {
+                    const merged = idx === 0 ? `<td rowspan="${rowspan}">${serial}</td><td rowspan="${rowspan}"><strong>${g.name}</strong><br><small class="text-muted">${g.empIdStr}</small></td>` : '';
+                    const locs = getSummaryLocations(r);
+                    const checkInLocShort = (locs.checkInLoc || '—').length > 50 ? (locs.checkInLoc || '').substring(0, 50) + '...' : (locs.checkInLoc || '—');
+                    const checkOutLocShort = (locs.checkOutLoc || '—').length > 50 ? (locs.checkOutLoc || '').substring(0, 50) + '...' : (locs.checkOutLoc || '—');
+                    html += `
+                        <tr>
+                            ${merged}
+                            <td>${r.date ? new Date(r.date).toLocaleDateString() : '—'}</td>
+                            <td>${getCheckInDisplay(r)}</td>
+                            <td>${getCheckOutDisplay(r)}</td>
+                            <td>${getTotalHoursDisplay(r)}</td>
+                            <td><small>${checkInLocShort}</small></td>
+                            <td><small>${checkOutLocShort}</small></td>
+                        </tr>
+                    `;
+                    recordCount++;
+                });
+                serial++;
+            });
+        }
+
         tbody.innerHTML = html;
-        document.getElementById('recordCount').textContent = reportData.length;
-        updatePagination(totalPages);
+        document.getElementById('recordCount').textContent = recordCount;
+        document.getElementById('pagination').innerHTML = '';
     }
     
-    // Update pagination
-    function updatePagination(totalPages) {
-        const pagination = document.getElementById('pagination');
-        if (totalPages <= 1) {
-            pagination.innerHTML = '';
-            return;
+    
+    // Build export rows based on report type
+    function getExportRows() {
+        syncReportType();
+        if (reportType === 'session') {
+            const groups = groupByEmployeeDate(reportData);
+            const rows = [];
+            let serial = 1;
+            groups.forEach(record => {
+                const empName = record.employee_name || (record.employee_details && record.employee_details.name) || 'N/A';
+                const empId = record.employee_id || (record.employee_details && record.employee_details.employee_id) || '';
+                const dateStr = record.date ? new Date(record.date).toLocaleDateString() : '';
+                const sessions = record.sessions || [];
+                if (sessions.length === 0) {
+                    rows.push([serial, empName, empId, dateStr, '—', '—', '—', '—', '—']);
+                    serial++;
+                } else {
+                    let totalSecs = 0;
+                    sessions.forEach((sess, idx) => {
+                        totalSecs += sess.duration_seconds || 0;
+                        rows.push([
+                            serial,
+                            empName,
+                            empId,
+                            dateStr,
+                            idx + 1,
+                            sess.start_time || '—',
+                            sess.end_time || '—',
+                            formatDurationSeconds(sess.duration_seconds),
+                            (sess.start_location || '—').replace(/"/g, '""'),
+                            (sess.end_location || '—').replace(/"/g, '""')
+                        ]);
+                    });
+                    const firstS = sessions[0];
+                    const lastS = sessions[sessions.length - 1];
+                    rows.push([
+                        serial,
+                        empName,
+                        empId,
+                        dateStr,
+                        "Today's Duty Time",
+                        firstS.start_time || '—',
+                        lastS.end_time || '—',
+                        formatDurationSeconds(totalSecs),
+                        (firstS.start_location || '—').replace(/"/g, '""'),
+                        (lastS.end_location || '—').replace(/"/g, '""')
+                    ]);
+                    serial++;
+                }
+            });
+            return {
+                headers: ['Serial', 'Employee Name', 'Employee ID', 'Date', 'Session No', 'Start Time', 'End Time', 'Session Duration', 'Start Location', 'End Location'],
+                rows
+            };
+        } else {
+            const groupedByEmp = {};
+            reportData.forEach(r => {
+                const empId = r.employee || (r.employee_details && r.employee_details.id) || 'x';
+                const empName = r.employee_name || (r.employee_details && r.employee_details.name) || 'N/A';
+                const empIdStr = r.employee_id || (r.employee_details && r.employee_details.employee_id) || '';
+                if (!groupedByEmp[empId]) groupedByEmp[empId] = { name: empName, empIdStr, rows: [] };
+                groupedByEmp[empId].rows.push(r);
+            });
+            const rows = [];
+            let serial = 1;
+            Object.keys(groupedByEmp).forEach(eid => {
+                const empSerial = serial++;
+                groupedByEmp[eid].rows.forEach(r => {
+                    const locs = getSummaryLocations(r);
+                    rows.push([
+                        empSerial,
+                        groupedByEmp[eid].name,
+                        groupedByEmp[eid].empIdStr,
+                        r.date ? new Date(r.date).toLocaleDateString() : '',
+                        getCheckInDisplay(r) || '—',
+                        getCheckOutDisplay(r) || '—',
+                        getTotalHoursDisplay(r) || '—',
+                        (locs.checkInLoc || '—').replace(/"/g, '""'),
+                        (locs.checkOutLoc || '—').replace(/"/g, '""')
+                    ]);
+                });
+            });
+            return {
+                headers: ['Serial', 'Employee Name', 'Employee ID', 'Date', 'Check In', 'Check Out', "Today's Duty Time", 'Check In Location', 'Check Out Location'],
+                rows
+            };
         }
-        
-        let html = '';
-        for (let i = 1; i <= totalPages; i++) {
-            html += `
-                <li class="page-item ${i === currentPage ? 'active' : ''}">
-                    <a class="page-link" href="#" onclick="goToPage(${i}); return false;">${i}</a>
-                </li>
-            `;
-        }
-        pagination.innerHTML = html;
     }
-    
-    // Go to page
-    function goToPage(page) {
-        currentPage = page;
-        displayTable();
-    }
-    
+
     // Export CSV
     function exportCSV() {
         if (reportData.length === 0) {
             showAlert('No data to export. Please generate a report first.', 'warning');
             return;
         }
-        
-        const headers = ['Employee Name', 'Employee ID', 'Date', 'Check In', 'Check Out', 'Hours', 'Locations', 'Status', 'Remarks'];
-        const rows = reportData.map(r => [
-            r.employee_name || '',
-            r.employee_id || '',
-            r.date || '',
-            r.check_in_time || '',
-            r.check_out_time || '',
-            r.total_hours || '',
-            r.total_locations_logged || '',
-            r.status || '',
-            r.remarks || ''
-        ]);
-        
-        const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
+        const { headers, rows } = getExportRows();
+        const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell)}"`).join(',')).join('\n');
+        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`;
+        a.download = `attendance_${reportType}_${new Date().toISOString().split('T')[0]}.csv`;
         a.click();
     }
     
-    // Export PDF (placeholder)
+    // Export PDF
     function exportPDF() {
-        showAlert('PDF export feature coming soon!', 'info');
+        if (reportData.length === 0) {
+            showAlert('No data to export. Please generate a report first.', 'warning');
+            return;
+        }
+        try {
+            const { jsPDF } = window.jspdf;
+            const { headers, rows } = getExportRows();
+            const doc = new jsPDF({ orientation: headers.length > 8 ? 'landscape' : 'portrait' });
+            doc.setFontSize(14);
+            doc.text(`Attendance ${reportType === 'session' ? 'Session' : 'Summary'} Report`, 14, 15);
+            doc.setFontSize(10);
+            doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 22);
+            doc.autoTable({
+                head: [headers],
+                body: rows,
+                startY: 28,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235] }
+            });
+            doc.save(`attendance_${reportType}_${new Date().toISOString().split('T')[0]}.pdf`);
+        } catch (e) {
+            console.error('PDF export error:', e);
+            showAlert('PDF export failed. Please try again.', 'danger');
+        }
     }
     
     // Export JSON
@@ -584,13 +932,76 @@
             showAlert('No data to export. Please generate a report first.', 'warning');
             return;
         }
-        
-        const json = JSON.stringify(reportData, null, 2);
+        syncReportType();
+        let exportData;
+        if (reportType === 'session') {
+            const groups = groupByEmployeeDate(reportData);
+            exportData = groups.map((record, idx) => {
+                const sessions = record.sessions || [];
+                let totalSecs = 0;
+                sessions.forEach(s => { totalSecs += s.duration_seconds || 0; });
+                const firstS = sessions[0];
+                const lastS = sessions[sessions.length - 1];
+                return {
+                    serial: idx + 1,
+                    employee_name: record.employee_name || (record.employee_details && record.employee_details.name) || 'N/A',
+                    employee_id: record.employee_id || (record.employee_details && record.employee_details.employee_id) || '',
+                    date: record.date,
+                    sessions: sessions.map((s, i) => ({
+                        session_no: i + 1,
+                        start_time: s.start_time,
+                        end_time: s.end_time,
+                        duration: formatDurationSeconds(s.duration_seconds),
+                        start_location: s.start_location,
+                        end_location: s.end_location
+                    })),
+                    duty_time: sessions.length > 0 ? {
+                        start_time: firstS.start_time,
+                        end_time: lastS.end_time,
+                        duration: formatDurationSeconds(totalSecs),
+                        start_location: firstS.start_location,
+                        end_location: lastS.end_location
+                    } : null
+                };
+            });
+        } else {
+            const groupedByEmp = {};
+            reportData.forEach(r => {
+                const empId = r.employee || (r.employee_details && r.employee_details.id) || 'x';
+                const empName = r.employee_name || (r.employee_details && r.employee_details.name) || 'N/A';
+                const empIdStr = r.employee_id || (r.employee_details && r.employee_details.employee_id) || '';
+                if (!groupedByEmp[empId]) groupedByEmp[empId] = { name: empName, empIdStr, rows: [] };
+                groupedByEmp[empId].rows.push(r);
+            });
+            let empSerial = 1;
+            Object.keys(groupedByEmp).forEach(eid => {
+                groupedByEmp[eid].serial = empSerial++;
+            });
+            exportData = [];
+            Object.keys(groupedByEmp).forEach(eid => {
+                const g = groupedByEmp[eid];
+                g.rows.forEach(r => {
+                    const locs = getSummaryLocations(r);
+                    exportData.push({
+                        serial: g.serial,
+                        employee_name: g.name,
+                        employee_id: g.empIdStr,
+                        date: r.date,
+                        check_in: getCheckInDisplay(r),
+                        check_out: getCheckOutDisplay(r),
+                        todays_duty_time: getTotalHoursDisplay(r),
+                        check_in_location: locs.checkInLoc || '—',
+                        check_out_location: locs.checkOutLoc || '—'
+                    });
+                });
+            });
+        }
+        const json = JSON.stringify(exportData, null, 2);
         const blob = new Blob([json], { type: 'application/json' });
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `attendance_report_${new Date().toISOString().split('T')[0]}.json`;
+        a.download = `attendance_${reportType}_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
     }
     
@@ -627,10 +1038,22 @@
         setTimeout(() => alertDiv.remove(), 5000);
     }
     
+    // Sync reportType from selector
+    function syncReportType() {
+        const sel = document.getElementById('reportTypeSelect');
+        if (sel) reportType = sel.value;
+    }
+
     // Initialize on page load
     window.addEventListener('load', function() {
         initCharts();
         loadFilters();
+        syncReportType();
+        document.getElementById('reportTypeSelect').addEventListener('change', function() {
+            syncReportType();
+            updateSummary();
+            displayTable();
+        });
     });
 </script>
 {% endblock %}

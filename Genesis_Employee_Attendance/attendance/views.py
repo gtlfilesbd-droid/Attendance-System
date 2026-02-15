@@ -139,9 +139,10 @@ def _update_attendance_for_date(employee, date):
     ).aggregate(s=Sum('total_hours'))['s'] or Decimal('0.00')
     first_session = DutySession.objects.filter(employee=employee, date=date).order_by('start_time').first()
     last_session = DutySession.objects.filter(employee=employee, date=date).order_by('-start_time').first()
-    first_time = first_session.start_time.time() if first_session else None
-    last_time = (last_session.end_time.time() if last_session and last_session.end_time else
-                 last_session.start_time.time() if last_session else None)
+    first_time = timezone.localtime(first_session.start_time).time() if first_session else None
+    last_time = (timezone.localtime(last_session.end_time).time()
+                 if last_session and last_session.end_time else
+                 timezone.localtime(last_session.start_time).time() if last_session else None)
     Attendance.objects.update_or_create(
         employee=employee,
         date=date,
@@ -349,7 +350,8 @@ def all_attendance(request):
     - end_date (YYYY-MM-DD, optional)
     - department (optional) - Filter by department
     - status (optional) - Filter by status
-    - employee_id (UUID, optional) - Specific employee
+    - employee_id (UUID, optional) - Specific employee or multiple (employee_id=id1&employee_id=id2)
+    - include_sessions (1, optional) - Include DutySession details and derived times per record
     - page (int, optional) - Page number
     - page_size (int, optional) - Items per page
     
@@ -361,7 +363,8 @@ def all_attendance(request):
     end_date_str = request.query_params.get('end_date')
     department = request.query_params.get('department')
     status_filter = request.query_params.get('status')
-    employee_id = request.query_params.get('employee_id')
+    employee_ids = request.query_params.getlist('employee_id')
+    include_sessions = request.query_params.get('include_sessions') == '1'
     
     # Build base query
     queryset = Attendance.objects.all().select_related('employee')
@@ -399,9 +402,9 @@ def all_attendance(request):
     if status_filter:
         queryset = queryset.filter(status=status_filter)
     
-    # Filter by employee
-    if employee_id:
-        queryset = queryset.filter(employee__id=employee_id)
+    # Filter by employee (supports multiple)
+    if employee_ids:
+        queryset = queryset.filter(employee__id__in=employee_ids)
     
     # Order by date descending, then employee name
     queryset = queryset.order_by('-date', 'employee__name')
@@ -411,13 +414,19 @@ def all_attendance(request):
     page = paginator.paginate_queryset(queryset, request)
     
     if page is not None:
-        serializer = AttendanceReportSerializer(page, many=True)
+        serializer = AttendanceReportSerializer(
+            page, many=True,
+            context={'request': request, 'include_sessions': include_sessions}
+        )
         return paginator.get_paginated_response({
             'success': True,
             'data': serializer.data
         })
     
-    serializer = AttendanceReportSerializer(queryset, many=True)
+    serializer = AttendanceReportSerializer(
+        queryset, many=True,
+        context={'request': request, 'include_sessions': include_sessions}
+    )
     return Response({
         'success': True,
         'data': serializer.data

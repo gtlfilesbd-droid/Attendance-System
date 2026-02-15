@@ -330,7 +330,7 @@
         routeData.forEach((loc, index) => {
             const timestamp = loc.timestamp || loc.created_at;
             const date = timestamp ? new Date(timestamp) : new Date();
-            const formattedTime = mapTracker ? mapTracker.formatTimestamp(timestamp) : date.toLocaleTimeString();
+            const formattedTime = mapTracker ? mapTracker.formatTimestamp(timestamp) : date.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const address = loc.address || '';
             const speed = loc.speed ? (loc.speed * 3.6).toFixed(1) : null;
             

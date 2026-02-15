@@ -1,18 +1,30 @@
 {% extends 'base.html' %}
+{% load dashboard_filters %}
 
 {% block title %}Dashboard - Genesis Employee Attendance{% endblock %}
 
 {% block content %}
 <!-- Page Header -->
-<div class="page-header">
-    <h2><i class="fas fa-tachometer-alt me-2"></i>Dashboard Overview</h2>
-    <p>Real-time attendance statistics and recent activities</p>
+<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-3">
+    <div>
+        <h2><i class="fas fa-tachometer-alt me-2"></i>Dashboard Overview</h2>
+        <p>Duty-based attendance statistics and recent activities</p>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <label for="datePicker" class="form-label mb-0 fw-medium">Date:</label>
+        <input type="date" id="datePicker" class="form-control" style="width: auto;"
+               value="{{ selected_date|date:'Y-m-d' }}"
+               max="{{ today|date:'Y-m-d' }}">
+        <button type="button" class="btn btn-primary btn-sm" id="applyDateBtn">
+            <i class="fas fa-search me-1"></i>Apply
+        </button>
+    </div>
 </div>
 
-<!-- Statistics Cards -->
+<!-- Statistics Cards (clickable) -->
 <div class="row g-4 mb-4">
     <div class="col-md-3 col-sm-6">
-        <div class="stat-card primary">
+        <div class="stat-card primary clickable-card" data-filter="total" role="button" tabindex="0">
             <div class="icon">
                 <i class="fas fa-users"></i>
             </div>
@@ -22,32 +34,32 @@
     </div>
     
     <div class="col-md-3 col-sm-6">
-        <div class="stat-card success">
+        <div class="stat-card success clickable-card" data-filter="on_duty" role="button" tabindex="0">
             <div class="icon">
                 <i class="fas fa-check-circle"></i>
             </div>
-            <div class="value">{{ stats.present_count }}</div>
-            <div class="label">Present Today</div>
+            <div class="value">{{ stats.on_duty_count }}</div>
+            <div class="label">On Duty</div>
         </div>
     </div>
     
     <div class="col-md-3 col-sm-6">
-        <div class="stat-card warning">
+        <div class="stat-card warning clickable-card" data-filter="off_duty" role="button" tabindex="0">
             <div class="icon">
                 <i class="fas fa-clock"></i>
             </div>
-            <div class="value">{{ stats.late_count }}</div>
-            <div class="label">Late Today</div>
+            <div class="value">{{ stats.off_duty_count }}</div>
+            <div class="label">Off Duty</div>
         </div>
     </div>
     
     <div class="col-md-3 col-sm-6">
-        <div class="stat-card danger">
+        <div class="stat-card danger clickable-card" data-filter="absent" role="button" tabindex="0">
             <div class="icon">
                 <i class="fas fa-times-circle"></i>
             </div>
             <div class="value">{{ stats.absent_count }}</div>
-            <div class="label">Absent Today</div>
+            <div class="label">Absent</div>
         </div>
     </div>
 </div>
@@ -66,7 +78,7 @@
     <div class="col-lg-4">
         <div class="stat-card">
             <h5 class="mb-3">
-                <i class="fas fa-chart-pie me-2"></i>Today's Distribution
+                <i class="fas fa-chart-pie me-2"></i>Distribution ({{ selected_date|date:"M d, Y" }})
             </h5>
             <canvas id="distributionChart" height="200"></canvas>
         </div>
@@ -93,7 +105,7 @@
                         </div>
                     </div>
                     <small class="text-muted mt-2 d-block">
-                        {{ stats.present_count }} out of {{ stats.total_employees }} employees present
+                        {{ stats.on_duty_count|add:stats.off_duty_count }} out of {{ stats.total_employees }} employees attended
                     </small>
                 </div>
             </div>
@@ -103,22 +115,18 @@
     <div class="col-md-6">
         <div class="stat-card">
             <h5 class="mb-3">
-                <i class="fas fa-info-circle me-2"></i>Today's Summary
+                <i class="fas fa-info-circle me-2"></i>Summary ({{ selected_date|date:"M d, Y" }})
             </h5>
             <div class="row text-center">
-                <div class="col-3">
-                    <div class="value" style="font-size: 1.75rem; color: var(--success);">{{ stats.present_count }}</div>
-                    <small class="text-muted d-block">Present</small>
+                <div class="col-4">
+                    <div class="value" style="font-size: 1.75rem; color: var(--success);">{{ stats.on_duty_count }}</div>
+                    <small class="text-muted d-block">On Duty</small>
                 </div>
-                <div class="col-3">
-                    <div class="value" style="font-size: 1.75rem; color: var(--warning);">{{ stats.late_count }}</div>
-                    <small class="text-muted d-block">Late</small>
+                <div class="col-4">
+                    <div class="value" style="font-size: 1.75rem; color: var(--warning);">{{ stats.off_duty_count }}</div>
+                    <small class="text-muted d-block">Off Duty</small>
                 </div>
-                <div class="col-3">
-                    <div class="value" style="font-size: 1.75rem; color: var(--primary);">{{ stats.half_day_count }}</div>
-                    <small class="text-muted d-block">Half Day</small>
-                </div>
-                <div class="col-3">
+                <div class="col-4">
                     <div class="value" style="font-size: 1.75rem; color: var(--danger);">{{ stats.absent_count }}</div>
                     <small class="text-muted d-block">Absent</small>
                 </div>
@@ -140,7 +148,7 @@
                 </a>
             </div>
             
-            {% if recent_activities %}
+            {% if recent_activities_enriched %}
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
                     <thead class="table-light">
@@ -150,55 +158,43 @@
                             <th>Check In</th>
                             <th>Check Out</th>
                             <th>Hours</th>
-                            <th>Locations</th>
+                            <th>Start Location</th>
+                            <th>End Location</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for activity in recent_activities %}
+                        {% for item in recent_activities_enriched %}
                         <tr>
                             <td>
                                 <div>
-                                    <strong>{{ activity.employee.name }}</strong><br>
-                                    <small class="text-muted">{{ activity.employee.employee_id }}</small>
+                                    <strong>{{ item.att.employee.name }}</strong><br>
+                                    <small class="text-muted">{{ item.att.employee.employee_id }}</small>
                                 </div>
                             </td>
-                            <td>{{ activity.date|date:"M d, Y" }}</td>
+                            <td>{{ item.att.date|date:"M d, Y" }}</td>
                             <td>
-                                {% if activity.check_in_time %}
-                                    <span class="badge bg-success">{{ activity.check_in_time }}</span>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
+                                <span class="badge bg-success">{{ item.check_in_time_str }}</span>
                             </td>
                             <td>
-                                {% if activity.check_out_time %}
-                                    <span class="badge bg-info">{{ activity.check_out_time }}</span>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
+                                <span class="badge bg-info">{{ item.check_out_time_str }}</span>
                             </td>
                             <td>
-                                {% if activity.total_hours %}
-                                    <strong>{{ activity.total_hours }}h</strong>
-                                {% else %}
-                                    <span class="text-muted">—</span>
-                                {% endif %}
+                                <strong>{{ item.total_hours_str }}</strong>
                             </td>
+                            <td><small>{{ item.start_location }}</small></td>
+                            <td><small>{{ item.end_location }}</small></td>
                             <td>
-                                <span class="badge bg-secondary">{{ activity.total_locations_logged }}</span>
-                            </td>
-                            <td>
-                                {% if activity.status == 'PRESENT' %}
+                                {% if item.att.status == 'PRESENT' %}
                                     <span class="badge bg-success">Present</span>
-                                {% elif activity.status == 'LATE' %}
+                                {% elif item.att.status == 'LATE' %}
                                     <span class="badge bg-warning">Late</span>
-                                {% elif activity.status == 'HALF_DAY' %}
+                                {% elif item.att.status == 'HALF_DAY' %}
                                     <span class="badge bg-info">Half Day</span>
-                                {% elif activity.status == 'ABSENT' %}
+                                {% elif item.att.status == 'ABSENT' %}
                                     <span class="badge bg-danger">Absent</span>
                                 {% else %}
-                                    <span class="badge bg-secondary">{{ activity.status }}</span>
+                                    <span class="badge bg-secondary">{{ item.att.status }}</span>
                                 {% endif %}
                             </td>
                         </tr>
@@ -211,6 +207,21 @@
                 <i class="fas fa-info-circle me-2"></i>No recent activities found.
             </div>
             {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Employee List Modal -->
+<div class="modal fade" id="employeeListModal" tabindex="-1" aria-labelledby="employeeListModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="employeeListModalLabel">Employee List</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="employeeListModalBody">
+                <!-- Content loaded via fetch -->
+            </div>
         </div>
     </div>
 </div>
@@ -248,24 +259,24 @@
     const attendanceChart = new Chart(attendanceCtx, {
         type: 'line',
         data: {
-            labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+            labels: {{ trend_labels|safe }},
             datasets: [{
-                label: 'Present',
-                data: [85, 88, 82, 90, 87, 45, 30],
+                label: 'On Duty',
+                data: {{ trend_on_duty|safe }},
                 borderColor: '#10b981',
                 backgroundColor: 'rgba(16, 185, 129, 0.1)',
                 tension: 0.4,
                 fill: true
             }, {
-                label: 'Late',
-                data: [5, 3, 7, 2, 4, 2, 1],
+                label: 'Off Duty',
+                data: {{ trend_off_duty|safe }},
                 borderColor: '#f59e0b',
                 backgroundColor: 'rgba(245, 158, 11, 0.1)',
                 tension: 0.4,
                 fill: true
             }, {
                 label: 'Absent',
-                data: [10, 9, 11, 8, 9, 53, 69],
+                data: {{ trend_absent|safe }},
                 borderColor: '#ef4444',
                 backgroundColor: 'rgba(239, 68, 68, 0.1)',
                 tension: 0.4,
@@ -286,7 +297,7 @@
             scales: {
                 y: {
                     beginAtZero: true,
-                    max: 100
+                    suggestedMax: Math.max({{ stats.total_employees }}, 5)
                 }
             }
         }
@@ -297,18 +308,16 @@
     const distributionChart = new Chart(distributionCtx, {
         type: 'doughnut',
         data: {
-            labels: ['Present', 'Late', 'Half Day', 'Absent'],
+            labels: ['On Duty', 'Off Duty', 'Absent'],
             datasets: [{
                 data: [
-                    {{ stats.present_count }},
-                    {{ stats.late_count }},
-                    {{ stats.half_day_count }},
+                    {{ stats.on_duty_count }},
+                    {{ stats.off_duty_count }},
                     {{ stats.absent_count }}
                 ],
                 backgroundColor: [
                     '#10b981',
                     '#f59e0b',
-                    '#3b82f6',
                     '#ef4444'
                 ],
                 borderWidth: 2,
@@ -326,9 +335,59 @@
         }
     });
     
+    // Date picker: apply and reload
+    document.getElementById('applyDateBtn').addEventListener('click', function() {
+        const dateVal = document.getElementById('datePicker').value;
+        if (dateVal) {
+            window.location.href = '?date=' + dateVal;
+        }
+    });
+    document.getElementById('datePicker').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') document.getElementById('applyDateBtn').click();
+    });
+
+    // Clickable stat cards: open modal and fetch list
+    const employeeListUrl = '{% url "dashboard-employee-list" %}';
+    const selectedDate = '{{ selected_date|date:"Y-m-d" }}';
+    const modalTitles = {
+        total: 'Total Active Employees',
+        on_duty: 'On Duty',
+        off_duty: 'Off Duty',
+        absent: 'Absent'
+    };
+
+    document.querySelectorAll('.clickable-card').forEach(function(card) {
+        card.addEventListener('click', function() {
+            const filter = this.getAttribute('data-filter');
+            const modal = document.getElementById('employeeListModal');
+            const modalTitle = document.getElementById('employeeListModalLabel');
+            const modalBody = document.getElementById('employeeListModalBody');
+            modalTitle.textContent = modalTitles[filter] || filter;
+            modalBody.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Loading...</p></div>';
+            const bsModal = new bootstrap.Modal(modal);
+            bsModal.show();
+
+            fetch(employeeListUrl + '?filter=' + filter + '&date=' + selectedDate)
+                .then(function(r) { return r.text(); })
+                .then(function(html) {
+                    modalBody.innerHTML = html;
+                })
+                .catch(function(err) {
+                    modalBody.innerHTML = '<div class="alert alert-danger">Failed to load list. Please try again.</div>';
+                });
+        });
+    });
+
     // Auto-refresh dashboard every 60 seconds
     setInterval(function() {
         location.reload();
     }, 60000);
 </script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .clickable-card { cursor: pointer; }
+    .clickable-card:focus { outline: 2px solid var(--primary); outline-offset: 2px; }
+</style>
 {% endblock %}

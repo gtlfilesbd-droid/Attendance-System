@@ -48,13 +48,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  /// Format ISO datetime string to time only in device local time; respects 12/24 hour format
+  /// Format ISO datetime string to time only (with seconds) in device local time; respects 12/24 hour format
   String _formatTime(BuildContext context, String? iso) {
     if (iso == null || iso.isEmpty) return '--:--';
     try {
       final dt = DateTime.parse(iso);
       final local = dt.isUtc ? dt.toLocal() : dt;
-      return TimeOfDay.fromDateTime(local).format(context);
+      final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
+      return use24
+          ? DateFormat('HH:mm:ss').format(local)
+          : DateFormat('h:mm:ss a').format(local);
     } catch (_) {
       return '--:--';
     }

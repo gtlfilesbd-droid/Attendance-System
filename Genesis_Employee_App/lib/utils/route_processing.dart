@@ -34,6 +34,13 @@ class _RoutePoint {
   LatLng toLatLng() => LatLng(lat, lng);
 }
 
+double? _toDouble(dynamic value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble();
+  if (value is String) return double.tryParse(value);
+  return null;
+}
+
 /// Filter, dedupe, and smooth route locations for display.
 /// Returns points for polyline and distance in km.
 ProcessedRoute processRouteForDisplay(
@@ -46,13 +53,13 @@ ProcessedRoute processRouteForDisplay(
     return const ProcessedRoute(points: [], distanceKm: 0.0);
   }
 
-  // Parse into _RoutePoint list
+  // Parse into _RoutePoint list (top-level latitude/longitude or location.lat/lng; handle num or String)
   List<_RoutePoint> raw = [];
   for (var loc in locations) {
-    final latVal = loc['latitude'] ?? loc['location']?['lat'];
-    final lngVal = loc['longitude'] ?? loc['location']?['lng'];
-    final double? lat = latVal is num ? latVal.toDouble() : null;
-    final double? lng = lngVal is num ? lngVal.toDouble() : null;
+    final latVal = loc['latitude'] ?? (loc['location'] is Map ? (loc['location'] as Map)['lat'] : null);
+    final lngVal = loc['longitude'] ?? (loc['location'] is Map ? (loc['location'] as Map)['lng'] : null);
+    final double? lat = _toDouble(latVal);
+    final double? lng = _toDouble(lngVal);
     if (lat == null || lng == null) continue;
     double? acc;
     if (loc['accuracy'] != null && loc['accuracy'] is num) {

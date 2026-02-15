@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
-from django.db.models import Max
+from django.db.models import Max, Sum
 from datetime import datetime, timedelta, time
 from .models import LocationLog
 from .serializers import (
@@ -17,9 +17,38 @@ from .serializers import (
 # Dashboard (template) views
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
+from django.http import HttpResponse
 from django.conf import settings
+from decimal import Decimal
 
 logger = logging.getLogger('tracking')
+
+
+def _hours_to_hhmmss(hours):
+    """Convert decimal hours to HH:MM:SS format."""
+    if hours is None:
+        return '—'
+    try:
+        h = float(hours)
+        total_secs = int(round(h * 3600))
+        hrs, remainder = divmod(total_secs, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    except (TypeError, ValueError):
+        return '—'
+
+
+def _seconds_to_hhmmss(total_seconds):
+    """Convert total seconds to HH:MM:SS format."""
+    if total_seconds is None:
+        return '—'
+    try:
+        s = int(total_seconds)
+        hrs, remainder = divmod(s, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    except (TypeError, ValueError):
+        return '—'
 
 
 def _get_time_ago(timestamp):
@@ -367,10 +396,14 @@ def employee_route(request):
             lat = loc.get('latitude')
             lng = loc.get('longitude')
             if lat is not None and lng is not None:
+                lat_f = float(lat)
+                lng_f = float(lng)
                 formatted_locations.append({
+                    'latitude': lat_f,
+                    'longitude': lng_f,
                     'location': {
-                        'lat': float(lat),
-                        'lng': float(lng)
+                        'lat': lat_f,
+                        'lng': lng_f
                     },
                     'timestamp': loc.get('timestamp'),
                     'address': loc.get('address', ''),
@@ -510,67 +543,257 @@ class LocationLogViewSet(viewsets.ReadOnlyModelViewSet):
 @login_required
 def dashboard_home(request):
     """
-    Main dashboard page. Stats from LocationLog (real-time):
-    - Present = employees who logged location in last 15 minutes
-    - Late = of those present, first location today after 9:30 AM
-    - Absent = total_employees - present_count
+    Main dashboard page. Stats from DutySession (duty-based):
+    - On Duty = employees who started duty but have not ended it yet
+    - Off Duty = employees who completed duty (both start and end)
+    - Absent = employees who were never On Duty for the selected date
     Template: dashboard/index.html
     """
     from employees.models import Employee
-    from attendance.models import Attendance
+    from attendance.models import Attendance, DutySession
 
     today = timezone.localdate()
+
+    # Parse selected date from query param
+    date_str = request.GET.get('date')
+    if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            selected_date = today
+    else:
+        selected_date = today
+
+    # Don't allow future dates
+    if selected_date > today:
+        selected_date = today
 
     # Total active employees
     total_employees = Employee.objects.filter(is_active=True).count()
 
-    # Present today = who logged at least one location today (distinct employees)
-    present_employee_ids = list(
-        LocationLog.objects.filter(timestamp__date=today)
-        .values_list('employee_id', flat=True)
-        .distinct()
+    # On Duty: employees with open session (end_time is NULL) for selected date
+    on_duty_ids = set(
+        DutySession.objects.filter(
+            date=selected_date, end_time__isnull=True
+        ).values_list('employee_id', flat=True).distinct()
     )
-    present_count = len(present_employee_ids)
+    on_duty_count = len(on_duty_ids)
 
-    # Absent = everyone else
-    absent_count = max(total_employees - present_count, 0)
+    # Off Duty: employees with at least one closed session for date AND no open session
+    employees_with_closed = set(
+        DutySession.objects.filter(
+            date=selected_date, end_time__isnull=False
+        ).values_list('employee_id', flat=True).distinct()
+    )
+    off_duty_ids = employees_with_closed - on_duty_ids
+    off_duty_count = len(off_duty_ids)
 
-    # Late = present employees whose first location today was after 9:30 AM
-    late_count = 0
-    for emp_id in present_employee_ids:
-        first_log = LocationLog.objects.filter(
-            employee_id=emp_id,
-            timestamp__date=today,
-        ).order_by('timestamp').first()
-        if first_log and first_log.timestamp.time() > time(9, 30):
-            late_count += 1
+    # Absent: total_active - on_duty - off_duty
+    absent_count = max(total_employees - on_duty_count - off_duty_count, 0)
 
-    # Half day not derived from location window; use 0 or keep from Attendance if desired
-    half_day_count = 0
-
-    # Attendance percentage (present vs total)
+    # Attendance percentage (on_duty + off_duty vs total)
+    attended = on_duty_count + off_duty_count
     attendance_percentage = (
-        (present_count / total_employees * 100) if total_employees > 0 else 0
+        (attended / total_employees * 100) if total_employees > 0 else 0
     )
 
-    # Recent activities: today's Attendance records when available (e.g. after daily task)
+    # Last 7 days trend (ending on selected_date)
+    trend_dates = [selected_date - timedelta(days=i) for i in range(6, -1, -1)]
+    trend_on_duty = []
+    trend_off_duty = []
+    trend_absent = []
+    for d in trend_dates:
+        on_ids = set(
+            DutySession.objects.filter(date=d, end_time__isnull=True)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        )
+        closed_ids = set(
+            DutySession.objects.filter(date=d, end_time__isnull=False)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        )
+        off_ids = closed_ids - on_ids
+        trend_on_duty.append(len(on_ids))
+        trend_off_duty.append(len(off_ids))
+        trend_absent.append(max(total_employees - len(on_ids) - len(off_ids), 0))
+
+    # Recent activities: selected date's Attendance records, enriched with start/end locations
     recent_activities = Attendance.objects.filter(
-        date=today
+        date=selected_date
     ).select_related('employee').order_by('-created_at')[:10]
+
+    recent_activities_enriched = []
+    for att in recent_activities:
+        first_sess = DutySession.objects.filter(
+            employee=att.employee, date=att.date
+        ).order_by('start_time').first()
+        last_sess = DutySession.objects.filter(
+            employee=att.employee, date=att.date
+        ).order_by('-start_time').first()
+        start_loc = first_sess.start_address if first_sess and first_sess.start_address else '—'
+        end_loc = (last_sess.end_address if last_sess and last_sess.end_time and last_sess.end_address else '—')
+        total_seconds = 0
+        for sess in DutySession.objects.filter(employee=att.employee, date=att.date, end_time__isnull=False):
+            total_seconds += int((sess.end_time - sess.start_time).total_seconds())
+        recent_activities_enriched.append({
+            'att': att,
+            'start_location': start_loc or '—',
+            'end_location': end_loc or '—',
+            'check_in_time_str': timezone.localtime(first_sess.start_time).strftime('%I:%M:%S %p') if first_sess else '—',
+            'check_out_time_str': timezone.localtime(last_sess.end_time).strftime('%I:%M:%S %p') if last_sess and last_sess.end_time else '—',
+            'total_hours_str': _seconds_to_hhmmss(int(total_seconds)) if total_seconds else '—',
+        })
 
     context = {
         'today': today,
+        'selected_date': selected_date,
         'stats': {
             'total_employees': total_employees,
-            'present_count': present_count,
-            'late_count': late_count,
+            'on_duty_count': on_duty_count,
+            'off_duty_count': off_duty_count,
             'absent_count': absent_count,
-            'half_day_count': half_day_count,
             'attendance_percentage': round(attendance_percentage, 1),
+            'selected_date': selected_date,
         },
-        'recent_activities': recent_activities,
+        'trend_labels': json.dumps([d.strftime('%a %m/%d') for d in trend_dates]),
+        'trend_on_duty': json.dumps(trend_on_duty),
+        'trend_off_duty': json.dumps(trend_off_duty),
+        'trend_absent': json.dumps(trend_absent),
+        'recent_activities_enriched': recent_activities_enriched,
     }
     return render(request, 'dashboard/index.html', context)
+
+
+@login_required
+def dashboard_employee_list(request):
+    """
+    Return HTML partial (table) for employee list by filter.
+    GET /dashboard/employee-list/?filter=total|on_duty|off_duty|absent&date=YYYY-MM-DD
+    """
+    from employees.models import Employee
+    from attendance.models import DutySession
+
+    filter_type = request.GET.get('filter', 'total')
+    date_str = request.GET.get('date')
+    today = timezone.localdate()
+
+    if date_str:
+        try:
+            selected_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except ValueError:
+            selected_date = today
+    else:
+        selected_date = today
+
+    if selected_date > today:
+        selected_date = today
+
+    employees = []
+    if filter_type == 'total':
+        employees = list(
+            Employee.objects.filter(is_active=True)
+            .order_by('name')
+            .values('id', 'name', 'employee_id', 'department', 'designation', 'email', 'phone')
+        )
+        employees = [{'name': e['name'], 'employee_id': e['employee_id'], 'department': e['department'],
+                     'designation': e['designation'] or '—', 'email': e['email'], 'phone': e['phone'] or '—'} for e in employees]
+    elif filter_type == 'on_duty':
+        on_duty_ids = list(
+            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        )
+        for emp in Employee.objects.filter(id__in=on_duty_ids, is_active=True).select_related():
+            open_session = DutySession.objects.filter(
+                employee=emp, date=selected_date, end_time__isnull=True
+            ).order_by('-start_time').first()
+            latest_log = LocationLog.objects.filter(
+                employee=emp, timestamp__date=selected_date
+            ).order_by('-timestamp').first()
+            present_location = (latest_log.address if latest_log and latest_log.address
+                               else (open_session.start_address if open_session else '—'))
+            speed = (float(latest_log.speed) if latest_log and latest_log.speed is not None else None)
+            current_seconds = None
+            if open_session:
+                delta = timezone.now() - open_session.start_time
+                current_seconds = int(delta.total_seconds())
+            employees.append({
+                'name': emp.name,
+                'employee_id': emp.employee_id,
+                'department': emp.department or '—',
+                'start_time': timezone.localtime(open_session.start_time).strftime('%I:%M:%S %p') if open_session else '—',
+                'present_location': present_location or '—',
+                'speed': f'{speed:.2f} m/s' if speed is not None else '—',
+                'current_duty_hours': _seconds_to_hhmmss(current_seconds),
+            })
+        employees.sort(key=lambda x: x['name'])
+    elif filter_type == 'off_duty':
+        on_duty_ids = set(
+            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        )
+        off_duty_ids = set(
+            DutySession.objects.filter(date=selected_date, end_time__isnull=False)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        ) - on_duty_ids
+        for emp in Employee.objects.filter(id__in=off_duty_ids, is_active=True).select_related():
+            first_session = DutySession.objects.filter(
+                employee=emp, date=selected_date
+            ).order_by('start_time').first()
+            last_closed = DutySession.objects.filter(
+                employee=emp, date=selected_date, end_time__isnull=False
+            ).order_by('-end_time').first()
+            end_location = (last_closed.end_address if last_closed and last_closed.end_address else '—')
+            total_seconds = 0
+            for sess in DutySession.objects.filter(employee=emp, date=selected_date, end_time__isnull=False):
+                total_seconds += int((sess.end_time - sess.start_time).total_seconds())
+            latest_log = LocationLog.objects.filter(
+                employee=emp,
+                timestamp__date=selected_date,
+                timestamp__lte=last_closed.end_time if last_closed else timezone.now()
+            ).order_by('-timestamp').first()
+            speed = (float(latest_log.speed) if latest_log and latest_log.speed is not None else None)
+            employees.append({
+                'name': emp.name,
+                'employee_id': emp.employee_id,
+                'department': emp.department or '—',
+                'start_time': timezone.localtime(first_session.start_time).strftime('%I:%M:%S %p') if first_session else '—',
+                'end_time': timezone.localtime(last_closed.end_time).strftime('%I:%M:%S %p') if last_closed and last_closed.end_time else '—',
+                'end_location': end_location or '—',
+                'speed': f'{speed:.2f} m/s' if speed is not None else '—',
+                'total_duty_hours': _seconds_to_hhmmss(int(total_seconds)),
+            })
+        employees.sort(key=lambda x: x['name'])
+    elif filter_type == 'absent':
+        on_duty_ids = set(
+            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        )
+        off_duty_ids = set(
+            DutySession.objects.filter(date=selected_date, end_time__isnull=False)
+            .values_list('employee_id', flat=True)
+            .distinct()
+        ) - on_duty_ids
+        attended_ids = on_duty_ids | off_duty_ids
+        for emp in Employee.objects.filter(is_active=True).exclude(id__in=attended_ids).order_by('name'):
+            employees.append({
+                'name': emp.name,
+                'employee_id': emp.employee_id,
+                'department': emp.department or '—',
+                'designation': emp.designation or '—',
+                'email': emp.email,
+            })
+
+    context = {
+        'filter_type': filter_type,
+        'employees': employees,
+        'selected_date': selected_date,
+    }
+    return render(request, 'dashboard/employee_list_partial.html', context)
 
 
 @login_required
@@ -617,11 +840,15 @@ def attendance_reports_view(request):
     """
     from employees.models import Employee
     
-    # Get unique departments
-    departments = Employee.objects.values_list('department', flat=True).distinct().order_by('department')
-    
+    # Get unique departments and all employees; filter by department on client
+    import json
+    departments = [d for d in Employee.objects.values_list('department', flat=True).distinct().order_by('department') if d]
+    employees = list(Employee.objects.filter(is_active=True).order_by('name').values('id', 'employee_id', 'name', 'department'))
+    employees_json = json.dumps([{**e, 'id': str(e['id'])} for e in employees], default=str)
+
     context = {
         'departments': departments,
+        'employees_json': employees_json,
         'today': timezone.localdate(),
     }
     return render(request, 'dashboard/reports.html', context)
@@ -686,8 +913,8 @@ def export_csv(request):
         writer.writerow(['Half Day', summary['half_day_count']])
         writer.writerow(['Absent', summary['absent_count']])
         writer.writerow(['Attendance Rate', f"{summary['present_percentage']}%"])
-        writer.writerow(['Average Hours', summary['average_hours_worked']])
-        writer.writerow(['Total Hours', summary['total_hours_worked']])
+        writer.writerow(['Average Hours', _hours_to_hhmmss(summary['average_hours_worked'])])
+        writer.writerow(['Total Hours', _hours_to_hhmmss(summary['total_hours_worked'])])
         writer.writerow([])
         
         # Get detailed records
@@ -705,7 +932,7 @@ def export_csv(request):
                 att.employee.department,
                 att.check_in_time or '—',
                 att.check_out_time or '—',
-                att.total_hours,
+                _hours_to_hhmmss(att.total_hours),
                 att.total_locations_logged,
                 att.status,
                 att.remarks or ''
@@ -737,8 +964,8 @@ def export_csv(request):
                 summary['half_day_count'],
                 summary['absent_count'],
                 f"{summary['present_percentage']}%",
-                summary['average_hours_worked'],
-                summary['total_hours_worked']
+                _hours_to_hhmmss(summary['average_hours_worked']),
+                _hours_to_hhmmss(summary['total_hours_worked'])
             ])
             current_date += timedelta(days=1)
     
@@ -780,8 +1007,10 @@ def export_csv(request):
         writer.writerow(['Late', queryset.filter(status='LATE').count()])
         writer.writerow(['Half Day', queryset.filter(status='HALF_DAY').count()])
         writer.writerow(['Absent', queryset.filter(status='ABSENT').count()])
-        writer.writerow(['Total Hours', queryset.aggregate(Sum('total_hours'))['total_hours__sum'] or 0])
-        writer.writerow(['Average Hours', queryset.aggregate(Avg('total_hours'))['total_hours__avg'] or 0])
+        total_hrs = queryset.aggregate(Sum('total_hours'))['total_hours__sum'] or 0
+        avg_hrs = queryset.aggregate(Avg('total_hours'))['total_hours__avg'] or 0
+        writer.writerow(['Total Hours', _hours_to_hhmmss(total_hrs)])
+        writer.writerow(['Average Hours', _hours_to_hhmmss(avg_hrs)])
         writer.writerow([])
         
         # Detailed records
@@ -796,7 +1025,7 @@ def export_csv(request):
                 att.employee.department,
                 att.check_in_time or '—',
                 att.check_out_time or '—',
-                att.total_hours,
+                _hours_to_hhmmss(att.total_hours),
                 att.status
             ])
     

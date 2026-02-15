@@ -259,7 +259,7 @@
     // Update last update time
     function updateLastUpdateTime() {
         const now = new Date();
-        document.getElementById('lastUpdate').textContent = now.toLocaleTimeString();
+        document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
     
     // Start countdown timer (matches poll interval)
