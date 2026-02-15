@@ -14,6 +14,7 @@ from tracking.models import LocationLog
 from .serializers import (
     AttendanceSerializer, AttendanceReportSerializer, DailyAttendanceSummarySerializer
 )
+from employees.serializers import EmployeeProfileSerializer
 
 
 class StandardResultsSetPagination(PageNumberPagination):
@@ -352,6 +353,7 @@ def all_attendance(request):
     - status (optional) - Filter by status
     - employee_id (UUID, optional) - Specific employee or multiple (employee_id=id1&employee_id=id2)
     - include_sessions (1, optional) - Include DutySession details and derived times per record
+    - include_absent (1, optional) - Include synthetic absent records for in-scope employees with no DutySession
     - page (int, optional) - Page number
     - page_size (int, optional) - Items per page
     
@@ -365,6 +367,7 @@ def all_attendance(request):
     status_filter = request.query_params.get('status')
     employee_ids = request.query_params.getlist('employee_id')
     include_sessions = request.query_params.get('include_sessions') == '1'
+    include_absent = request.query_params.get('include_absent') == '1'
     
     # Build base query
     queryset = Attendance.objects.all().select_related('employee')
@@ -409,27 +412,148 @@ def all_attendance(request):
     # Order by date descending, then employee name
     queryset = queryset.order_by('-date', 'employee__name')
     
-    # Paginate
-    paginator = StandardResultsSetPagination()
-    page = paginator.paginate_queryset(queryset, request)
+    # Build synthetic absent records when requested
+    synthetic_absent = []
+    if include_absent:
+        # Resolve date range
+        if date_str:
+            try:
+                filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                start_date = end_date = filter_date
+            except ValueError:
+                start_date = end_date = None
+        elif start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                start_date = end_date = None
+        else:
+            since = timezone.now().date() - timedelta(days=7)
+            start_date = since
+            end_date = timezone.now().date()
+        
+        if start_date is not None and end_date is not None and (status_filter is None or status_filter == 'ABSENT'):
+            # In-scope employees: department, employee_ids, or all active
+            emp_qs = Employee.objects.filter(is_active=True)
+            if department:
+                emp_qs = emp_qs.filter(department=department)
+            if employee_ids:
+                emp_qs = emp_qs.filter(id__in=employee_ids)
+            in_scope_ids = set(emp_qs.values_list('id', flat=True))
+            
+            # Existing records: employee+date we already have (from Attendance or DutySession)
+            existing_att = set(
+                Attendance.objects.filter(
+                    date__gte=start_date, date__lte=end_date
+                ).values_list('employee_id', 'date')
+            )
+            on_or_off_duty = set(
+                DutySession.objects.filter(
+                    date__gte=start_date, date__lte=end_date
+                ).values_list('employee_id', 'date')
+            )
+            existing = existing_att | on_or_off_duty
+            
+            # Apply same filters to existing for consistency
+            if department:
+                emp_by_dept = set(Employee.objects.filter(department=department, is_active=True).values_list('id', flat=True))
+                existing = {(e, d) for e, d in existing if e in emp_by_dept}
+            if employee_ids:
+                emp_ids_set = set(employee_ids)
+                existing = {(e, d) for e, d in existing if str(e) in emp_ids_set or e in emp_ids_set}
+            
+            emp_cache = {e.id: e for e in Employee.objects.filter(id__in=in_scope_ids).select_related()}
+            emp_serializer = EmployeeProfileSerializer(context={'request': request})
+            
+            current = start_date
+            while current <= end_date:
+                for emp_id in in_scope_ids:
+                    if (emp_id, current) not in existing:
+                        emp = emp_cache.get(emp_id)
+                        if not emp:
+                            continue
+                        synthetic_absent.append({
+                            'id': None,
+                            'employee': str(emp.id),
+                            'employee_details': emp_serializer.to_representation(emp),
+                            'employee_name': emp.name,
+                            'employee_id': emp.employee_id or '',
+                            'date': current.isoformat(),
+                            'status': 'ABSENT',
+                            'first_location_time': None,
+                            'last_location_time': None,
+                            'check_in_time': None,
+                            'check_out_time': None,
+                            'total_hours': 0,
+                            'duration_hours': '0h 0m',
+                            'total_locations_logged': 0,
+                            'location_tracking_quality': 'No tracking',
+                            'is_complete': False,
+                            'is_overtime': False,
+                            'sessions': [],
+                            'check_in_time_str': None,
+                            'check_out_time_str': None,
+                            'total_hours_str': None,
+                            'duty_status': 'absent',
+                            'remarks': None,
+                            'created_at': None,
+                            'updated_at': None,
+                        })
+                current += timedelta(days=1)
     
-    if page is not None:
-        serializer = AttendanceReportSerializer(
-            page, many=True,
-            context={'request': request, 'include_sessions': include_sessions}
-        )
-        return paginator.get_paginated_response({
-            'success': True,
-            'data': serializer.data
-        })
-    
+    # Serialize real records
     serializer = AttendanceReportSerializer(
         queryset, many=True,
         context={'request': request, 'include_sessions': include_sessions}
     )
+    all_data = list(serializer.data)
+    
+    # Add synthetic absent and sort by date desc, employee name
+    all_data.extend(synthetic_absent)
+    all_data.sort(key=lambda r: (-(datetime.strptime(r['date'], '%Y-%m-%d').date() if r.get('date') else timezone.now().date()).toordinal(), (r.get('employee_name') or '').lower()))
+    
+    # Paginate combined list if needed
+    paginator = StandardResultsSetPagination()
+    page_num = request.query_params.get('page', 1)
+    try:
+        page_num = max(1, int(page_num))
+    except (TypeError, ValueError):
+        page_num = 1
+    page_size = request.query_params.get('page_size') or paginator.page_size
+    try:
+        page_size = min(paginator.max_page_size, max(1, int(page_size)))
+    except (TypeError, ValueError):
+        page_size = paginator.page_size
+    
+    start_idx = (page_num - 1) * page_size
+    end_idx = start_idx + page_size
+    page_data = all_data[start_idx:end_idx]
+    
+    if len(all_data) > page_size:
+        from urllib.parse import urlencode
+        base_url = request.build_absolute_uri(request.path)
+        get_params = dict(request.GET.items())
+        next_url = prev_url = None
+        if end_idx < len(all_data):
+            get_params['page'] = page_num + 1
+            next_url = f'{base_url}?{urlencode(get_params)}'
+        if start_idx > 0:
+            get_params['page'] = page_num - 1
+            prev_url = f'{base_url}?{urlencode(get_params)}'
+        return Response({
+            'count': len(all_data),
+            'next': next_url,
+            'previous': prev_url,
+            'results': {
+                'success': True,
+                'data': page_data,
+            }
+        })
+    
     return Response({
         'success': True,
-        'data': serializer.data
+        'data': page_data
     })
 
 

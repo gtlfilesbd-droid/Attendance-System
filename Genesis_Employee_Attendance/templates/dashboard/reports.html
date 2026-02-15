@@ -319,6 +319,88 @@
         return r.total_hours_str || formatHoursToHMS(r.total_hours) || '—';
     }
 
+    function formatDateLabel(isoStr) {
+        if (!isoStr) return '';
+        const d = new Date(isoStr);
+        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const day = days[d.getDay()];
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const dayNum = String(d.getDate()).padStart(2, '0');
+        return day + ' ' + m + '/' + dayNum;
+    }
+
+    // Single source of truth for duty status - used by both cards and graph
+    function getDutyStatus(r) {
+        if (r.duty_status) return r.duty_status;
+        if (r.status === 'ABSENT') return 'absent';
+        if (r.status === 'LATE' || r.status === 'PRESENT' || r.status === 'HALF_DAY') return 'off_duty';
+        return 'absent';
+    }
+
+    function normalizeDateKey(val) {
+        if (val == null || val === '') return null;
+        const s = String(val).trim();
+        // Avoid timezone shift: extract YYYY-MM-DD from ISO date or date-only string
+        const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+        const d = new Date(val);
+        if (isNaN(d.getTime())) return null;
+        const y = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${mo}-${day}`;
+    }
+
+    function computeAggregatedCounts() {
+        const dateGroups = {};
+        const unspecified = { on_duty: 0, off_duty: 0, absent: 0 };
+        reportData.forEach(record => {
+            const dateKey = normalizeDateKey(record.date || (record.employee_details && record.employee_details.date));
+            const bucket = dateKey ? (dateGroups[dateKey] ||= { on_duty: 0, off_duty: 0, absent: 0 }) : unspecified;
+            const ds = getDutyStatus(record);
+            bucket[ds]++;
+        });
+        const onDuty = Object.values(dateGroups).reduce((s, g) => s + g.on_duty, 0) + unspecified.on_duty;
+        const offDuty = Object.values(dateGroups).reduce((s, g) => s + g.off_duty, 0) + unspecified.off_duty;
+        const absent = Object.values(dateGroups).reduce((s, g) => s + g.absent, 0) + unspecified.absent;
+        // Build Trends from FULL date range (startDate..endDate) so sum always equals cards
+        const startEl = document.getElementById('startDate');
+        const endEl = document.getElementById('endDate');
+        const startStr = startEl && startEl.value ? startEl.value : null;
+        const endStr = endEl && endEl.value ? endEl.value : null;
+        let dates = [];
+        let onDutyData = [];
+        let offDutyData = [];
+        let absentData = [];
+        if (startStr && endStr && startStr <= endStr) {
+            const start = new Date(startStr);
+            const end = new Date(endStr);
+            const oneDay = 24 * 60 * 60 * 1000;
+            for (let d = new Date(start); d <= end; d.setTime(d.getTime() + oneDay)) {
+                const key = d.toISOString().slice(0, 10);
+                dates.push(key);
+                const g = dateGroups[key] || { on_duty: 0, off_duty: 0, absent: 0 };
+                onDutyData.push(g.on_duty);
+                offDutyData.push(g.off_duty);
+                absentData.push(g.absent);
+            }
+        }
+        if (dates.length === 0) {
+            dates = Object.keys(dateGroups).sort();
+            onDutyData = dates.map(d => dateGroups[d].on_duty);
+            offDutyData = dates.map(d => dateGroups[d].off_duty);
+            absentData = dates.map(d => dateGroups[d].absent);
+        }
+        const hasUnspecified = unspecified.on_duty + unspecified.off_duty + unspecified.absent > 0;
+        if (hasUnspecified) {
+            dates.push('_unspecified');
+            onDutyData.push(unspecified.on_duty);
+            offDutyData.push(unspecified.off_duty);
+            absentData.push(unspecified.absent);
+        }
+        return { dateGroups, dates, onDutyData, offDutyData, absentData, onDuty, offDuty, absent, total: onDuty + offDuty + absent };
+    }
+
     function getTotalSessionsCount() {
         let count = 0;
         reportData.forEach(r => {
@@ -343,74 +425,85 @@
     
     // Initialize charts
     function initCharts() {
-        // Trend Chart
-        const trendCtx = document.getElementById('trendChart').getContext('2d');
-        trendChart = new Chart(trendCtx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: 'On Duty',
-                    data: [],
-                    borderColor: '#10b981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                    tension: 0.4,
-                    fill: true
-                }, {
-                    label: 'Off Duty',
-                    data: [],
-                    borderColor: '#f59e0b',
-                    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                    tension: 0.4,
-                    fill: true
-                }, {
-                    label: 'Absent',
-                    data: [],
-                    borderColor: '#ef4444',
-                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                    tension: 0.4,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'top',
-                    }
+        if (typeof Chart === 'undefined') {
+            console.warn('Chart.js not loaded; charts disabled');
+            return;
+        }
+        const trendEl = document.getElementById('trendChart');
+        const distEl = document.getElementById('distributionChart');
+        if (!trendEl || !distEl) {
+            console.warn('Chart canvases not found');
+            return;
+        }
+        try {
+            trendChart = new Chart(trendEl.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'On Duty',
+                        data: [],
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'Off Duty',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
+                        label: 'Absent',
+                        data: [],
+                        borderColor: '#ef4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
                 },
-                scales: {
-                    y: {
-                        beginAtZero: true
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
                     }
                 }
-            }
-        });
-        
-        // Distribution Chart
-        const distCtx = document.getElementById('distributionChart').getContext('2d');
-        distributionChart = new Chart(distCtx, {
-            type: 'doughnut',
-            data: {
-                labels: ['On Duty', 'Off Duty', 'Absent'],
-                datasets: [{
-                    data: [0, 0, 0],
-                    backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
-                    borderWidth: 2,
-                    borderColor: '#fff'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'bottom',
+            });
+            distributionChart = new Chart(distEl.getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['On Duty', 'Off Duty', 'Absent'],
+                    datasets: [{
+                        data: [0, 0, 0],
+                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                        borderWidth: 2,
+                        borderColor: '#fff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                        }
                     }
                 }
-            }
-        });
+            });
+        } catch (e) {
+            console.error('Chart init error:', e);
+            trendChart = null;
+            distributionChart = null;
+        }
     }
     
     function updateEmployeeTriggerDisplay() {
@@ -517,7 +610,8 @@
         }
         
         // Use the all-attendance endpoint with filters; include_sessions=1 for both (Summary needs locations)
-        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}&include_sessions=1&page_size=500`;
+        // include_absent=1 ensures absent employees (no DutySession) appear in the report and are counted
+        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}&include_sessions=1&include_absent=1&page_size=500`;
         if (department) url += `&department=${department}`;
         if (selectedEmployeeIds.length > 0) {
             selectedEmployeeIds.forEach(id => { url += `&employee_id=${encodeURIComponent(id)}`; });
@@ -554,16 +648,12 @@
     // Update summary cards (duty-based + context-aware: Total Sessions / Total Hours)
     function updateSummary() {
         syncReportType();
-        const dutyStatus = (r) => r.duty_status || (r.status === 'ABSENT' ? 'absent' : (r.status === 'LATE' || r.status === 'PRESENT' || r.status === 'HALF_DAY' ? 'off_duty' : 'absent'));
-        const onDuty = reportData.filter(r => dutyStatus(r) === 'on_duty').length;
-        const offDuty = reportData.filter(r => dutyStatus(r) === 'off_duty').length;
-        const absent = reportData.filter(r => dutyStatus(r) === 'absent').length;
-        const total = reportData.length;
+        const agg = computeAggregatedCounts();
 
-        document.getElementById('summaryTotal').textContent = total;
-        document.getElementById('summaryOnDuty').textContent = onDuty;
-        document.getElementById('summaryOffDuty').textContent = offDuty;
-        document.getElementById('summaryAbsent').textContent = absent;
+        document.getElementById('summaryTotal').textContent = agg.total;
+        document.getElementById('summaryOnDuty').textContent = agg.onDuty;
+        document.getElementById('summaryOffDuty').textContent = agg.offDuty;
+        document.getElementById('summaryAbsent').textContent = agg.absent;
 
         const ctxLabel = document.getElementById('summaryContextLabel');
         const ctxValue = document.getElementById('summaryContextValue');
@@ -587,37 +677,20 @@
     
     // Update charts (duty-based: on_duty, off_duty, absent)
     function updateCharts() {
-        const dutyStatus = (r) => r.duty_status || (r.status === 'ABSENT' ? 'absent' : 'off_duty');
+        if (!trendChart || !distributionChart) return;
+        const agg = computeAggregatedCounts();
 
-        // Group by date
-        const dateGroups = {};
-        reportData.forEach(record => {
-            const date = record.date || (record.employee_details && record.employee_details.date);
-            if (!date) return;
-            if (!dateGroups[date]) {
-                dateGroups[date] = { on_duty: 0, off_duty: 0, absent: 0 };
-            }
-            const ds = dutyStatus(record);
-            dateGroups[date][ds]++;
-        });
-
-        const dates = Object.keys(dateGroups).sort();
-        const onDutyData = dates.map(d => dateGroups[d].on_duty);
-        const offDutyData = dates.map(d => dateGroups[d].off_duty);
-        const absentData = dates.map(d => dateGroups[d].absent);
-
-        trendChart.data.labels = dates;
-        trendChart.data.datasets[0].data = onDutyData;
-        trendChart.data.datasets[1].data = offDutyData;
-        trendChart.data.datasets[2].data = absentData;
+        trendChart.data.labels = agg.dates.map(d => d === '_unspecified' ? 'Other' : formatDateLabel(d));
+        trendChart.data.datasets[0].data = agg.onDutyData;
+        trendChart.data.datasets[1].data = agg.offDutyData;
+        trendChart.data.datasets[2].data = agg.absentData;
+        const maxVal = Math.max(...agg.onDutyData, ...agg.offDutyData, ...agg.absentData, 1);
+        if (trendChart.options.scales && trendChart.options.scales.y) {
+            trendChart.options.scales.y.suggestedMax = Math.max(maxVal, 5);
+        }
         trendChart.update();
 
-        // Distribution (on_duty, off_duty, absent)
-        const onDuty = reportData.filter(r => dutyStatus(r) === 'on_duty').length;
-        const offDuty = reportData.filter(r => dutyStatus(r) === 'off_duty').length;
-        const absent = reportData.filter(r => dutyStatus(r) === 'absent').length;
-
-        distributionChart.data.datasets[0].data = [onDuty, offDuty, absent];
+        distributionChart.data.datasets[0].data = [agg.onDuty, agg.offDuty, agg.absent];
         distributionChart.update();
     }
     
