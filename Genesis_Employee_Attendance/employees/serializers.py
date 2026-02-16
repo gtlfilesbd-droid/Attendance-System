@@ -5,13 +5,18 @@ from .models import Employee
 
 class EmployeeSerializer(serializers.ModelSerializer):
     """
-    Complete Employee serializer with all fields
+    Complete Employee serializer with all fields.
+    department and designation are FK IDs for write; department_name and designation_name for read.
     """
+    department_name = serializers.SerializerMethodField()
+    designation_name = serializers.SerializerMethodField()
+
     class Meta:
         model = Employee
         fields = [
             'id', 'employee_id', 'name', 'email', 'phone', 'password',
-            'department', 'designation', 'join_date', 'is_active',
+            'department', 'designation', 'department_name', 'designation_name',
+            'join_date', 'is_active',
             'profile_picture', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -55,6 +60,12 @@ class EmployeeSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("Employee with this email already exists.")
         return value
     
+    def get_department_name(self, obj):
+        return obj.department.name if obj.department else None
+
+    def get_designation_name(self, obj):
+        return obj.designation.name if obj.designation else None
+
     def validate_employee_id(self, value):
         """Validate employee_id uniqueness"""
         if self.instance:
@@ -115,12 +126,15 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
     account_age_days = serializers.SerializerMethodField()
     is_new_employee = serializers.SerializerMethodField()
     profile_picture_url = serializers.SerializerMethodField()
+    department_name = serializers.SerializerMethodField()
+    designation_name = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
         fields = [
             'id', 'employee_id', 'name', 'email', 'phone',
-            'department', 'designation', 'join_date', 'is_active',
+            'department', 'designation', 'department_name', 'designation_name',
+            'join_date', 'is_active',
             'profile_picture', 'profile_picture_url', 'created_at', 'updated_at',
             'account_age_days', 'is_new_employee'
         ]
@@ -128,6 +142,12 @@ class EmployeeProfileSerializer(serializers.ModelSerializer):
             'id', 'employee_id', 'email', 'created_at', 'updated_at',
             'account_age_days', 'is_new_employee', 'profile_picture'
         ]
+
+    def get_department_name(self, obj):
+        return obj.department.name if obj.department else None
+
+    def get_designation_name(self, obj):
+        return obj.designation.name if obj.designation else None
 
     def get_profile_picture_url(self, obj):
         """Return full URL for profile picture; used by app for read-only display."""

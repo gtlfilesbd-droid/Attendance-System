@@ -1,11 +1,12 @@
 """
 Celery tasks for attendance app
 """
+from decimal import Decimal
 from celery import shared_task
 from django.utils import timezone
-from django.db.models import Q
+from django.db.models import Q, Sum
 from datetime import timedelta
-from .models import AttendanceRecord, AttendanceAlert, LeaveRequest
+from .models import AttendanceRecord, AttendanceAlert, LeaveRequest, DutySession, Attendance
 from employees.models import Employee
 
 
@@ -226,3 +227,103 @@ def generate_attendance_reports():
         report_data.append(stats)
     
     return f"Generated report for {len(report_data)} employees"
+
+
+def _update_attendance_for_date(employee, date):
+    """Set Attendance.total_hours for employee+date to sum of all closed DutySessions for that date."""
+    total = DutySession.objects.filter(
+        employee=employee,
+        date=date,
+        end_time__isnull=False,
+    ).aggregate(s=Sum('total_hours'))['s'] or Decimal('0.00')
+    first_session = DutySession.objects.filter(employee=employee, date=date).order_by('start_time').first()
+    last_session = DutySession.objects.filter(employee=employee, date=date).order_by('-start_time').first()
+    first_time = timezone.localtime(first_session.start_time).time() if first_session else None
+    last_time = (
+        timezone.localtime(last_session.end_time).time()
+        if last_session and last_session.end_time
+        else timezone.localtime(last_session.start_time).time() if last_session else None
+    )
+    Attendance.objects.update_or_create(
+        employee=employee,
+        date=date,
+        defaults={
+            'total_hours': total,
+            'first_location_time': first_time,
+            'last_location_time': last_time,
+            'check_in_time': first_time,
+            'check_out_time': last_time,
+            'status': 'PRESENT',
+        },
+    )
+
+
+def _auto_close_session(session, remark, end_lat=None, end_lon=None, end_addr=None):
+    """Close a DutySession with remark. Updates end_time, total_hours, end location, remarks."""
+    now = timezone.now()
+    session.end_time = now
+    session.end_latitude = end_lat
+    session.end_longitude = end_lon
+    session.end_address = end_addr
+    delta = session.end_time - session.start_time
+    session.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+    session.remarks = remark
+    session.save()
+    _update_attendance_for_date(session.employee, session.date)
+
+
+@shared_task(name='attendance.auto_end_duty_sessions')
+def auto_end_duty_sessions():
+    """
+    Auto-end open duty sessions:
+    1. Date change: session.date < today -> remark "Date changes."
+    2. 9 hours active: duration >= 9h -> remark "9 hours active."
+    3. 30 min inactive: no LocationLog for employee in last 30 min -> remark "User kept mobile network turned off for 30 minutes."
+    """
+    from tracking.models import LocationLog
+
+    now = timezone.now()
+    today = timezone.localdate()
+    cutoff_30min = now - timedelta(minutes=30)
+    nine_hours_secs = 9 * 3600
+
+    open_sessions = list(DutySession.objects.filter(end_time__isnull=True).select_related('employee'))
+    closed = 0
+
+    for session in open_sessions:
+        remark = None
+
+        # Priority 1: Date change
+        if session.date < today:
+            remark = "Date changes."
+
+        # Priority 2: 9 hours active
+        elif remark is None and (now - session.start_time).total_seconds() >= nine_hours_secs:
+            remark = "9 hours active."
+
+        # Priority 3: 30 min no LocationLog
+        elif remark is None:
+            last_log = (
+                LocationLog.objects.filter(employee=session.employee)
+                .order_by('-timestamp')
+                .values_list('timestamp', flat=True)
+                .first()
+            )
+            if last_log is None or last_log < cutoff_30min:
+                remark = "User kept mobile network turned off for 30 minutes."
+
+        if remark:
+            last_log_obj = (
+                LocationLog.objects.filter(employee=session.employee)
+                .order_by('-timestamp')
+                .first()
+            )
+            end_lat = end_lon = end_addr = None
+            if last_log_obj and last_log_obj.location:
+                end_lat = last_log_obj.location.y if hasattr(last_log_obj.location, 'y') else None
+                end_lon = last_log_obj.location.x if hasattr(last_log_obj.location, 'x') else None
+                end_addr = last_log_obj.address
+            _auto_close_session(session, remark, end_lat=end_lat, end_lon=end_lon, end_addr=end_addr)
+            closed += 1
+
+    return f"Auto-closed {closed} duty sessions"

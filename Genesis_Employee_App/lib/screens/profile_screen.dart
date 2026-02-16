@@ -65,8 +65,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final name = _employeeData?['name'] ?? 'Employee Name';
     final email = _employeeData?['email'] ?? 'email@example.com';
     final id = _employeeData?['employee_id'] ?? 'ID';
-    final department = _employeeData?['department'] ?? 'Department';
-    final designation = _employeeData?['designation'] ?? 'Designation';
+    final department = _employeeData?['department_name'] ?? '—';
+    final designation = _employeeData?['designation_name'] ?? '—';
     final phone = _employeeData?['phone'] as String?;
     final joinDateRaw = _employeeData?['join_date'] as String?;
     final accountAgeDays = _employeeData?['account_age_days'];

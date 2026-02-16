@@ -185,6 +185,7 @@ class AttendanceReportSerializer(serializers.ModelSerializer):
                 'start_location': sess.start_address or f"{sess.start_latitude}, {sess.start_longitude}",
                 'end_location': (sess.end_address or f"{sess.end_latitude}, {sess.end_longitude}") if sess.end_time else None,
                 'duration_seconds': delta_secs,
+                'remarks': sess.remarks or None,
             })
         check_in_str = timezone.localtime(first_sess.start_time).strftime('%I:%M:%S %p') if first_sess else None
         check_out_str = timezone.localtime(last_sess.end_time).strftime('%I:%M:%S %p') if last_sess and last_sess.end_time else None

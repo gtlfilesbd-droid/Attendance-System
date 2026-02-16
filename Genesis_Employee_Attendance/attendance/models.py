@@ -123,6 +123,7 @@ class DutySession(models.Model):
         default=0,
         help_text='Hours for this session (set when end_time is set)',
     )
+    remarks = models.TextField(null=True, blank=True, help_text='Auto-end reason or manual note')
 
     class Meta:
         db_table = 'duty_sessions'

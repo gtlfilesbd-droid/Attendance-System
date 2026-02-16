@@ -4,6 +4,38 @@ from django.contrib.auth.models import User
 from django.contrib.auth.hashers import make_password, check_password
 
 
+class Department(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'departments'
+        ordering = ['name']
+        verbose_name = 'Department'
+        verbose_name_plural = 'Departments'
+
+    def __str__(self):
+        return self.name
+
+
+class Designation(models.Model):
+    name = models.CharField(max_length=100, unique=True)
+    description = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'designations'
+        ordering = ['name']
+        verbose_name = 'Designation'
+        verbose_name_plural = 'Designations'
+
+    def __str__(self):
+        return self.name
+
+
 class Employee(models.Model):
     """
     Employee model for Genesis Employee Attendance System.
@@ -27,9 +59,21 @@ class Employee(models.Model):
     phone = models.CharField(max_length=20)
     password = models.CharField(max_length=128)  # Hashed password
     
-    # Employment Information
-    department = models.CharField(max_length=100)
-    designation = models.CharField(max_length=100)
+    # Employment Information (ForeignKey - select from dropdown in admin)
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='employees'
+    )
+    designation = models.ForeignKey(
+        Designation,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='employees'
+    )
     join_date = models.DateField()
     is_active = models.BooleanField(default=True, db_index=True)
     

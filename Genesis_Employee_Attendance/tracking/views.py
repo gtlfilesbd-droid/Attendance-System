@@ -180,7 +180,7 @@ def live_locations(request):
             location = LocationLog.objects.filter(
                 employee_id=item['employee'],
                 timestamp=item['latest_time']
-            ).select_related('employee').first()
+            ).select_related('employee', 'employee__department', 'employee__designation').first()
 
             if location and location.employee.is_active:
                 ts = location.timestamp
@@ -189,8 +189,8 @@ def live_locations(request):
                     'employee_id': str(location.employee.id),
                     'employee_name': location.employee.name,
                     'employee_code': location.employee.employee_id,
-                    'department': location.employee.department,
-                    'designation': location.employee.designation,
+                    'department': location.employee.department.name if location.employee.department else '—',
+                    'designation': location.employee.designation.name if location.employee.designation else '—',
                     'latitude': location.latitude,
                     'longitude': location.longitude,
                     'accuracy': location.accuracy,
@@ -270,7 +270,7 @@ def latest_location(request):
     location = (
         LocationLog.objects.filter(employee=employee)
         .order_by('-timestamp')
-        .select_related('employee')
+        .select_related('employee', 'employee__department', 'employee__designation')
         .first()
     )
     if not location:
@@ -286,8 +286,8 @@ def latest_location(request):
         'employee_name': employee.name,
         'employee_code': employee.employee_id,
         'employee_email': employee.email,
-        'department': employee.department,
-        'designation': employee.designation,
+        'department': employee.department.name if employee.department else '—',
+        'designation': employee.designation.name if employee.designation else '—',
         'location': {
             'lat': location.latitude,
             'lng': location.longitude
@@ -693,18 +693,18 @@ def dashboard_employee_list(request):
     if filter_type == 'total':
         employees = list(
             Employee.objects.filter(is_active=True)
+            .select_related('department', 'designation')
             .order_by('name')
-            .values('id', 'name', 'employee_id', 'department', 'designation', 'email', 'phone')
         )
-        employees = [{'name': e['name'], 'employee_id': e['employee_id'], 'department': e['department'],
-                     'designation': e['designation'] or '—', 'email': e['email'], 'phone': e['phone'] or '—'} for e in employees]
+        employees = [{'name': e.name, 'employee_id': e.employee_id, 'department': e.department.name if e.department else '—',
+                     'designation': e.designation.name if e.designation else '—', 'email': e.email, 'phone': e.phone or '—'} for e in employees]
     elif filter_type == 'on_duty':
         on_duty_ids = list(
             DutySession.objects.filter(date=selected_date, end_time__isnull=True)
             .values_list('employee_id', flat=True)
             .distinct()
         )
-        for emp in Employee.objects.filter(id__in=on_duty_ids, is_active=True).select_related():
+        for emp in Employee.objects.filter(id__in=on_duty_ids, is_active=True).select_related('department', 'designation'):
             open_session = DutySession.objects.filter(
                 employee=emp, date=selected_date, end_time__isnull=True
             ).order_by('-start_time').first()
@@ -721,7 +721,7 @@ def dashboard_employee_list(request):
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
-                'department': emp.department or '—',
+                'department': emp.department.name if emp.department else '—',
                 'start_time': timezone.localtime(open_session.start_time).strftime('%I:%M:%S %p') if open_session else '—',
                 'present_location': present_location or '—',
                 'speed': f'{speed:.2f} m/s' if speed is not None else '—',
@@ -739,7 +739,7 @@ def dashboard_employee_list(request):
             .values_list('employee_id', flat=True)
             .distinct()
         ) - on_duty_ids
-        for emp in Employee.objects.filter(id__in=off_duty_ids, is_active=True).select_related():
+        for emp in Employee.objects.filter(id__in=off_duty_ids, is_active=True).select_related('department', 'designation'):
             first_session = DutySession.objects.filter(
                 employee=emp, date=selected_date
             ).order_by('start_time').first()
@@ -759,7 +759,7 @@ def dashboard_employee_list(request):
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
-                'department': emp.department or '—',
+                'department': emp.department.name if emp.department else '—',
                 'start_time': timezone.localtime(first_session.start_time).strftime('%I:%M:%S %p') if first_session else '—',
                 'end_time': timezone.localtime(last_closed.end_time).strftime('%I:%M:%S %p') if last_closed and last_closed.end_time else '—',
                 'end_location': end_location or '—',
@@ -779,12 +779,12 @@ def dashboard_employee_list(request):
             .distinct()
         ) - on_duty_ids
         attended_ids = on_duty_ids | off_duty_ids
-        for emp in Employee.objects.filter(is_active=True).exclude(id__in=attended_ids).order_by('name'):
+        for emp in Employee.objects.filter(is_active=True).exclude(id__in=attended_ids).select_related('department', 'designation').order_by('name'):
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
-                'department': emp.department or '—',
-                'designation': emp.designation or '—',
+                'department': emp.department.name if emp.department else '—',
+                'designation': emp.designation.name if emp.designation else '—',
                 'email': emp.email,
             })
 
@@ -838,13 +838,13 @@ def attendance_reports_view(request):
     Template: dashboard/reports.html
     Date range selector + CSV/PDF export options.
     """
-    from employees.models import Employee
+    from employees.models import Employee, Department
     
     # Get unique departments and all employees; filter by department on client
     import json
-    departments = [d for d in Employee.objects.values_list('department', flat=True).distinct().order_by('department') if d]
-    employees = list(Employee.objects.filter(is_active=True).order_by('name').values('id', 'employee_id', 'name', 'department'))
-    employees_json = json.dumps([{**e, 'id': str(e['id'])} for e in employees], default=str)
+    departments = list(Department.objects.filter(is_active=True).values_list('name', flat=True).order_by('name'))
+    employees = list(Employee.objects.filter(is_active=True).select_related('department').order_by('name').values('id', 'employee_id', 'name', 'department__name'))
+    employees_json = json.dumps([{'id': str(e['id']), 'employee_id': e['employee_id'], 'name': e['name'], 'department': e['department__name'] or '—'} for e in employees], default=str)
 
     context = {
         'departments': departments,
@@ -918,9 +918,9 @@ def export_csv(request):
         writer.writerow([])
         
         # Get detailed records
-        queryset = Attendance.objects.filter(date=reference_date).select_related('employee')
+        queryset = Attendance.objects.filter(date=reference_date).select_related('employee', 'employee__department')
         if department:
-            queryset = queryset.filter(employee__department=department)
+            queryset = queryset.filter(employee__department__name=department)
         
         writer.writerow(['Employee ID', 'Name', 'Department', 'Check In', 'Check Out', 
                         'Total Hours', 'Locations Logged', 'Status', 'Remarks'])
@@ -929,7 +929,7 @@ def export_csv(request):
             writer.writerow([
                 att.employee.employee_id,
                 att.employee.name,
-                att.employee.department,
+                att.employee.department.name if att.employee.department else '—',
                 att.check_in_time or '—',
                 att.check_out_time or '—',
                 _hours_to_hhmmss(att.total_hours),
@@ -988,16 +988,16 @@ def export_csv(request):
         queryset = Attendance.objects.filter(
             date__gte=first_day,
             date__lte=last_day
-        ).select_related('employee')
+        ).select_related('employee', 'employee__department')
         
         if department:
-            queryset = queryset.filter(employee__department=department)
+            queryset = queryset.filter(employee__department__name=department)
         
         # Summary
         from django.db.models import Sum, Avg
         total_employees = Employee.objects.filter(is_active=True).count()
         if department:
-            total_employees = Employee.objects.filter(is_active=True, department=department).count()
+            total_employees = Employee.objects.filter(is_active=True, department__name=department).count()
         
         writer.writerow(['Summary'])
         writer.writerow(['Working Days', (last_day - first_day).days + 1])
@@ -1022,7 +1022,7 @@ def export_csv(request):
                 att.date,
                 att.employee.employee_id,
                 att.employee.name,
-                att.employee.department,
+                att.employee.department.name if att.employee.department else '—',
                 att.check_in_time or '—',
                 att.check_out_time or '—',
                 _hours_to_hhmmss(att.total_hours),

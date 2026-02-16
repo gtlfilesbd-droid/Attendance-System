@@ -203,6 +203,7 @@ def end_duty(request):
     session.end_latitude = lat
     session.end_longitude = lon
     session.end_address = address or None
+    session.remarks = "User End this session"
     delta = session.end_time - session.start_time
     session.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
     session.save()
@@ -399,7 +400,7 @@ def all_attendance(request):
     
     # Filter by department
     if department:
-        queryset = queryset.filter(employee__department=department)
+        queryset = queryset.filter(employee__department__name=department)
     
     # Filter by status
     if status_filter:
@@ -437,7 +438,7 @@ def all_attendance(request):
             # In-scope employees: department, employee_ids, or all active
             emp_qs = Employee.objects.filter(is_active=True)
             if department:
-                emp_qs = emp_qs.filter(department=department)
+                emp_qs = emp_qs.filter(department__name=department)
             if employee_ids:
                 emp_qs = emp_qs.filter(id__in=employee_ids)
             in_scope_ids = set(emp_qs.values_list('id', flat=True))
@@ -457,7 +458,7 @@ def all_attendance(request):
             
             # Apply same filters to existing for consistency
             if department:
-                emp_by_dept = set(Employee.objects.filter(department=department, is_active=True).values_list('id', flat=True))
+                emp_by_dept = set(Employee.objects.filter(department__name=department, is_active=True).values_list('id', flat=True))
                 existing = {(e, d) for e, d in existing if e in emp_by_dept}
             if employee_ids:
                 emp_ids_set = set(employee_ids)
@@ -601,7 +602,7 @@ def attendance_report(request):
         # Get detailed records
         queryset = Attendance.objects.filter(date=reference_date)
         if department:
-            queryset = queryset.filter(employee__department=department)
+            queryset = queryset.filter(employee__department__name=department)
         
         records = AttendanceReportSerializer(queryset, many=True).data
         
@@ -660,7 +661,7 @@ def attendance_report(request):
         )
         
         if department:
-            queryset = queryset.filter(employee__department=department)
+            queryset = queryset.filter(employee__department__name=department)
         
         # Calculate statistics
         from employees.models import Employee
@@ -668,7 +669,7 @@ def attendance_report(request):
         if department:
             total_employees = Employee.objects.filter(
                 is_active=True,
-                department=department
+                department__name=department
             ).count()
         
         working_days = (last_day - first_day).days + 1

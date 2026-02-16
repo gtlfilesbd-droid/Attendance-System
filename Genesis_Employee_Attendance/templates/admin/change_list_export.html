@@ -1,0 +1,50 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+#content-main .object-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+#content-main .object-tools li {
+  margin: 0;
+  padding: 0;
+}
+#content-main .object-tools li a,
+#content-main .object-tools .object-tool-btn,
+#content-main .object-tools .addlink,
+#content-main .object-tools .historylink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  min-width: 140px;
+  padding: 8px 16px;
+  box-sizing: border-box;
+  font-size: 13px;
+  border-radius: 4px;
+  text-decoration: none;
+  transition: opacity 0.15s ease;
+}
+#content-main .object-tools li a:hover,
+#content-main .object-tools .object-tool-btn:hover,
+#content-main .object-tools .addlink:hover,
+#content-main .object-tools .historylink:hover {
+  opacity: 0.9;
+}
+</style>
+{% endblock %}
+
+{% block object-tools-items %}
+<li><a href="{{ request.path }}export/print/{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" target="_blank" class="historylink object-tool-btn">{% trans "Print" %}</a></li>
+<li><a href="{{ request.path }}export/pdf/{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="historylink object-tool-btn">{% trans "Download PDF" %}</a></li>
+<li><a href="{{ request.path }}export/excel/{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="historylink object-tool-btn">{% trans "Download Excel" %}</a></li>
+{{ block.super }}
+{% endblock %}

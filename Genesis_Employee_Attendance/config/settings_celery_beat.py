@@ -9,6 +9,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'attendance.tasks.mark_absent_employees',
         'schedule': crontab(hour=23, minute=59),  # Run at 11:59 PM daily
     },
+    'auto-end-duty-sessions': {
+        'task': 'attendance.auto_end_duty_sessions',
+        'schedule': crontab(minute='*/5'),  # Run every 5 minutes
+    },
     'check-late-arrivals': {
         'task': 'attendance.tasks.check_late_arrivals',
         'schedule': crontab(hour='*/1'),  # Run every hour

@@ -1,72 +1,90 @@
 from django.test import TestCase
-from django.contrib.auth import get_user_model
-from .models import Employee, Department, WorkShift, EmployeeShift
-from datetime import time, date
-
-Employee = get_user_model()
+from .models import Employee, Department, Designation
+from datetime import date
 
 
-class EmployeeModelTest(TestCase):
-    def setUp(self):
-        self.employee = Employee.objects.create_user(
-            username='testuser',
-            email='test@example.com',
-            password='testpass123',
-            employee_id='EMP001',
-            first_name='Test',
-            last_name='User',
-            department='IT',
-            role='STAFF',
-            designation='Developer'
-        )
-    
-    def test_employee_creation(self):
-        """Test employee creation"""
-        self.assertEqual(self.employee.username, 'testuser')
-        self.assertEqual(self.employee.employee_id, 'EMP001')
-        self.assertEqual(self.employee.get_full_name(), 'Test User')
-    
-    def test_employee_str(self):
-        """Test employee string representation"""
-        expected = f"EMP001 - Test User"
-        self.assertEqual(str(self.employee), expected)
+def _create_employee(employee_id='EMP001', name='Test User', email='test@example.com',
+                     department=None, designation=None, **kwargs):
+    """Helper to create an Employee with required fields."""
+    defaults = {
+        'employee_id': employee_id,
+        'name': name,
+        'email': email,
+        'phone': '+8801234567890',
+        'password': 'testpass123',
+        'join_date': date.today(),
+        'department': department,
+        'designation': designation,
+        **kwargs
+    }
+    emp = Employee(**defaults)
+    emp.set_password(defaults['password'])
+    emp.save()
+    return emp
 
 
 class DepartmentModelTest(TestCase):
     def setUp(self):
         self.department = Department.objects.create(
             name='Information Technology',
-            code='IT',
-            description='IT Department'
+            description='IT Department',
+            is_active=True
         )
-    
+
     def test_department_creation(self):
         """Test department creation"""
         self.assertEqual(self.department.name, 'Information Technology')
-        self.assertEqual(self.department.code, 'IT')
-    
+        self.assertEqual(self.department.description, 'IT Department')
+        self.assertTrue(self.department.is_active)
+
     def test_department_str(self):
         """Test department string representation"""
-        expected = "IT - Information Technology"
-        self.assertEqual(str(self.department), expected)
+        self.assertEqual(str(self.department), 'Information Technology')
 
 
-class WorkShiftModelTest(TestCase):
+class DesignationModelTest(TestCase):
     def setUp(self):
-        self.shift = WorkShift.objects.create(
-            name='Morning Shift',
-            start_time=time(9, 0),
-            end_time=time(17, 0),
-            description='9 AM to 5 PM'
+        self.designation = Designation.objects.create(
+            name='Developer',
+            description='Software developer',
+            is_active=True
         )
-    
-    def test_shift_creation(self):
-        """Test work shift creation"""
-        self.assertEqual(self.shift.name, 'Morning Shift')
-        self.assertEqual(self.shift.start_time, time(9, 0))
-        self.assertEqual(self.shift.end_time, time(17, 0))
-    
-    def test_shift_str(self):
-        """Test shift string representation"""
-        expected = "Morning Shift (09:00:00 - 17:00:00)"
-        self.assertEqual(str(self.shift), expected)
+
+    def test_designation_creation(self):
+        """Test designation creation"""
+        self.assertEqual(self.designation.name, 'Developer')
+        self.assertTrue(self.designation.is_active)
+
+    def test_designation_str(self):
+        """Test designation string representation"""
+        self.assertEqual(str(self.designation), 'Developer')
+
+
+class EmployeeModelTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='IT', description='IT Dept')
+        self.designation = Designation.objects.create(name='Developer')
+        self.employee = _create_employee(
+            employee_id='EMP001',
+            name='Test User',
+            email='test@example.com',
+            department=self.department,
+            designation=self.designation
+        )
+
+    def test_employee_creation(self):
+        """Test employee creation"""
+        self.assertEqual(self.employee.employee_id, 'EMP001')
+        self.assertEqual(self.employee.name, 'Test User')
+        self.assertEqual(self.employee.email, 'test@example.com')
+        self.assertEqual(self.employee.department, self.department)
+        self.assertEqual(self.employee.designation, self.designation)
+
+    def test_employee_str(self):
+        """Test employee string representation"""
+        self.assertEqual(str(self.employee), 'EMP001 - Test User')
+
+    def test_employee_password_check(self):
+        """Test password hashing and verification"""
+        self.assertTrue(self.employee.check_password('testpass123'))
+        self.assertFalse(self.employee.check_password('wrong'))

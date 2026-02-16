@@ -12,3 +12,5 @@ django-filter
 Pillow
 gunicorn
 dj-database-url>=2.0
+openpyxl
+reportlab

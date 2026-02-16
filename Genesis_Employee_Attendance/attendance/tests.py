@@ -1,109 +1,83 @@
 from django.test import TestCase
-from django.contrib.auth import get_user_model
 from django.utils import timezone
-from .models import AttendanceRecord, LeaveRequest, LeaveBalance, Holiday
-from datetime import date, timedelta
+from datetime import date, time, timedelta
+from .models import Attendance, DutySession
+from employees.models import Employee, Department, Designation
 
-Employee = get_user_model()
+
+def _create_employee(employee_id='EMP001', **kwargs):
+    """Helper to create an Employee."""
+    defaults = {
+        'employee_id': employee_id,
+        'name': 'Test User',
+        'email': f'test{employee_id}@example.com',
+        'phone': '+8801234567890',
+        'password': 'testpass123',
+        'join_date': date.today(),
+        **kwargs
+    }
+    emp = Employee(**defaults)
+    emp.set_password('testpass123')
+    emp.save()
+    return emp
 
 
-class AttendanceRecordTest(TestCase):
+class AttendanceTest(TestCase):
     def setUp(self):
-        self.employee = Employee.objects.create_user(
-            username='testuser',
-            email='test@example.com',
-            password='testpass123',
-            employee_id='EMP001',
-            first_name='Test',
-            last_name='User',
-            department='IT',
-            role='STAFF',
-            designation='Developer'
-        )
-        
-        self.attendance = AttendanceRecord.objects.create(
+        self.employee = _create_employee()
+        today = date.today()
+        self.attendance = Attendance.objects.create(
             employee=self.employee,
-            date=date.today(),
+            date=today,
             status='PRESENT',
-            check_in_time=timezone.now()
+            check_in_time=time(9, 0),
+            check_out_time=time(17, 30),
+            total_locations_logged=10
         )
-    
+
     def test_attendance_creation(self):
         """Test attendance record creation"""
         self.assertEqual(self.attendance.employee, self.employee)
         self.assertEqual(self.attendance.status, 'PRESENT')
         self.assertIsNotNone(self.attendance.check_in_time)
-    
+        self.assertEqual(self.attendance.total_locations_logged, 10)
+
     def test_attendance_str(self):
         """Test attendance string representation"""
-        expected = f"Test User - {date.today()} - PRESENT"
+        expected = f"{self.employee.name} - {self.attendance.date} - PRESENT"
         self.assertEqual(str(self.attendance), expected)
 
+    def test_calculate_total_hours(self):
+        """Test total hours calculation"""
+        self.attendance.calculate_total_hours()
+        self.assertAlmostEqual(float(self.attendance.total_hours), 8.5, places=1)
 
-class LeaveRequestTest(TestCase):
+
+class DutySessionTest(TestCase):
     def setUp(self):
-        self.employee = Employee.objects.create_user(
-            username='testuser',
-            email='test@example.com',
-            password='testpass123',
-            employee_id='EMP001',
-            first_name='Test',
-            last_name='User',
-            department='IT',
-            role='STAFF',
-            designation='Developer'
+        self.employee = _create_employee()
+        today = date.today()
+        start_dt = timezone.make_aware(
+            timezone.datetime.combine(today, time(9, 0)),
+            timezone.get_current_timezone()
         )
-        
-        self.leave = LeaveRequest.objects.create(
+        self.session = DutySession.objects.create(
             employee=self.employee,
-            leave_type='SICK',
-            start_date=date.today(),
-            end_date=date.today() + timedelta(days=2),
-            total_days=3,
-            reason='Medical appointment',
-            status='PENDING'
+            date=today,
+            start_time=start_dt,
+            start_latitude=23.8103,
+            start_longitude=90.4125,
+            start_address='Office'
         )
-    
-    def test_leave_creation(self):
-        """Test leave request creation"""
-        self.assertEqual(self.leave.employee, self.employee)
-        self.assertEqual(self.leave.leave_type, 'SICK')
-        self.assertEqual(self.leave.status, 'PENDING')
-    
-    def test_leave_total_days_calculation(self):
-        """Test total days calculation"""
-        self.assertEqual(self.leave.total_days, 3)
 
+    def test_duty_session_creation(self):
+        """Test duty session creation"""
+        self.assertEqual(self.session.employee, self.employee)
+        self.assertIsNotNone(self.session.start_time)
+        self.assertEqual(self.session.start_latitude, 23.8103)
+        self.assertIsNone(self.session.end_time)
 
-class LeaveBalanceTest(TestCase):
-    def setUp(self):
-        self.employee = Employee.objects.create_user(
-            username='testuser',
-            email='test@example.com',
-            password='testpass123',
-            employee_id='EMP001',
-            first_name='Test',
-            last_name='User',
-            department='IT',
-            role='STAFF',
-            designation='Developer'
-        )
-        
-        self.balance = LeaveBalance.objects.create(
-            employee=self.employee,
-            year=2026,
-            sick_leave_total=10,
-            sick_leave_used=2,
-            casual_leave_total=12,
-            casual_leave_used=3
-        )
-    
-    def test_leave_balance_creation(self):
-        """Test leave balance creation"""
-        self.assertEqual(self.balance.employee, self.employee)
-        self.assertEqual(self.balance.year, 2026)
-    
-    def test_leave_remaining_properties(self):
-        """Test leave remaining calculations"""
-        self.assertEqual(self.balance.sick_leave_remaining, 8)
-        self.assertEqual(self.balance.casual_leave_remaining, 9)
+    def test_duty_session_str(self):
+        """Test duty session string representation"""
+        self.assertIn(self.employee.name, str(self.session))
+        self.assertIn(str(self.session.date), str(self.session))

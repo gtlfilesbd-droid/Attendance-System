@@ -1,16 +1,22 @@
 from django.contrib import admin
 from django.contrib.gis.admin import OSMGeoAdmin
+from config.admin_export import AdminExportMixin
 from .models import LocationLog
+from attendance.admin_filters import format_time_12h
 
 
 @admin.register(LocationLog)
-class LocationLogAdmin(OSMGeoAdmin):
-    list_display = ['id', 'employee', 'timestamp', 'latitude', 'longitude', 'accuracy', 'battery_level', 'speed']
+class LocationLogAdmin(AdminExportMixin, OSMGeoAdmin):
+    change_list_template = 'admin/tracking/locationlog/change_list.html'
+    list_display = [
+        'id', 'employee', 'formatted_date', 'formatted_timestamp',
+        'latitude', 'longitude', 'accuracy', 'battery_level', 'speed'
+    ]
     list_filter = ['timestamp', 'employee']
     search_fields = ['employee__employee_id', 'employee__name', 'employee__email', 'address']
     ordering = ['-timestamp']
     readonly_fields = ['id', 'created_at', 'latitude', 'longitude']
-    
+
     fieldsets = (
         ('Employee & Location', {
             'fields': ('id', 'employee', 'location', 'latitude', 'longitude')
@@ -25,3 +31,16 @@ class LocationLogAdmin(OSMGeoAdmin):
             'fields': ('created_at',)
         }),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('employee')
+
+    def formatted_date(self, obj):
+        return obj.timestamp.strftime('%Y-%m-%d') if obj.timestamp else '—'
+    formatted_date.short_description = 'Date'
+    formatted_date.admin_order_field = 'timestamp'
+
+    def formatted_timestamp(self, obj):
+        return format_time_12h(obj.timestamp) if obj.timestamp else '—'
+    formatted_timestamp.short_description = 'Timestamp'
+    formatted_timestamp.admin_order_field = 'timestamp'

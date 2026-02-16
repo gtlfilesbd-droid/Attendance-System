@@ -1,67 +1,54 @@
 from django.test import TestCase
-from django.contrib.auth import get_user_model
 from django.contrib.gis.geos import Point
-from .models import LocationPoint, GeofenceZone, GeofenceEvent
+from django.utils import timezone
+from .models import LocationLog
+from employees.models import Employee, Department, Designation
 from datetime import date
 
-Employee = get_user_model()
+
+def _create_employee(employee_id='EMP001', **kwargs):
+    """Helper to create an Employee."""
+    defaults = {
+        'employee_id': employee_id,
+        'name': 'Test User',
+        'email': f'test{employee_id}@example.com',
+        'phone': '+8801234567890',
+        'password': 'testpass123',
+        'join_date': date.today(),
+        **kwargs
+    }
+    emp = Employee(**defaults)
+    emp.set_password('testpass123')
+    emp.save()
+    return emp
 
 
-class LocationPointTest(TestCase):
+class LocationLogTest(TestCase):
     def setUp(self):
-        self.employee = Employee.objects.create_user(
-            username='testuser',
-            email='test@example.com',
-            password='testpass123',
-            employee_id='EMP001',
-            first_name='Test',
-            last_name='User',
-            department='IT',
-            role='STAFF',
-            designation='Developer'
-        )
-        
-        self.location = LocationPoint.objects.create(
+        self.employee = _create_employee()
+        self.location = LocationLog.objects.create(
             employee=self.employee,
-            location=Point(-122.4194, 37.7749),
-            accuracy=10.5
+            location=Point(-122.4194, 37.7749),  # (longitude, latitude)
+            timestamp=timezone.now(),
+            accuracy=10.5,
+            battery_level=85,
+            speed=1.2,
+            address='123 Main St'
         )
-    
+
     def test_location_creation(self):
-        """Test location point creation"""
+        """Test location log creation"""
         self.assertEqual(self.location.employee, self.employee)
         self.assertIsNotNone(self.location.location)
         self.assertEqual(self.location.accuracy, 10.5)
-    
+        self.assertEqual(self.location.battery_level, 85)
+
     def test_location_coordinates(self):
-        """Test location coordinates properties"""
+        """Test latitude/longitude properties"""
         self.assertAlmostEqual(self.location.latitude, 37.7749, places=4)
         self.assertAlmostEqual(self.location.longitude, -122.4194, places=4)
 
-
-class GeofenceZoneTest(TestCase):
-    def setUp(self):
-        self.zone = GeofenceZone.objects.create(
-            name='Main Office',
-            zone_type='OFFICE',
-            center_point=Point(-122.4194, 37.7749),
-            radius=100,
-            is_active=True,
-            requires_checkin=True
-        )
-    
-    def test_geofence_creation(self):
-        """Test geofence zone creation"""
-        self.assertEqual(self.zone.name, 'Main Office')
-        self.assertEqual(self.zone.zone_type, 'OFFICE')
-        self.assertEqual(self.zone.radius, 100)
-    
-    def test_point_inside_geofence(self):
-        """Test if point is inside geofence"""
-        # Point very close to center
-        point = Point(-122.4194, 37.7749)
-        self.assertTrue(self.zone.is_inside(point))
-        
-        # Point far away
-        point_far = Point(-122.5, 37.8)
-        self.assertFalse(self.zone.is_inside(point_far))
+    def test_location_str(self):
+        """Test location log string representation"""
+        self.assertIn(self.employee.name, str(self.location))
+        self.assertIn(str(self.location.timestamp.date()), str(self.location))

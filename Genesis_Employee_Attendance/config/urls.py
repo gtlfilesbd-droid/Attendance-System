@@ -2,6 +2,11 @@
 URL configuration for Genesis Employee Attendance project.
 """
 from django.contrib import admin
+import config.admin  # noqa: F401 - re-registers User/Group with export mixin
+
+admin.site.site_header = 'Genesis Administration'
+admin.site.site_title = 'Genesis Administration'
+admin.site.index_title = 'Genesis Administration'
 from django.contrib.auth.views import LogoutView
 from django.urls import path, include
 from django.conf import settings

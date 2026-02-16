@@ -1,13 +1,30 @@
 from django.contrib import admin
 from django.utils.safestring import mark_safe
-from .models import Employee
+from config.admin_export import AdminExportMixin
+from .models import Employee, Department, Designation
+
+
+@admin.register(Department)
+class DepartmentAdmin(AdminExportMixin, admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['name', 'description']
+    ordering = ['name']
+
+
+@admin.register(Designation)
+class DesignationAdmin(AdminExportMixin, admin.ModelAdmin):
+    list_display = ['name', 'is_active', 'created_at']
+    list_filter = ['is_active']
+    search_fields = ['name', 'description']
+    ordering = ['name']
 
 
 @admin.register(Employee)
-class EmployeeAdmin(admin.ModelAdmin):
+class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
     list_display = ['employee_id', 'name', 'email', 'department', 'designation', 'is_active', 'join_date', 'created_at']
-    list_filter = ['is_active', 'department', 'join_date', 'created_at']
-    search_fields = ['employee_id', 'name', 'email', 'phone', 'department', 'designation']
+    list_filter = ['is_active', 'department', 'designation', 'join_date', 'created_at']
+    search_fields = ['employee_id', 'name', 'email', 'phone', 'department__name', 'designation__name']
     ordering = ['-created_at']
     readonly_fields = ['id', 'created_at', 'updated_at', 'profile_picture_preview']
     

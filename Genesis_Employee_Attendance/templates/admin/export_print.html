@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} - Print</title>
+    <style>
+        body { font-family: Arial, sans-serif; font-size: 12px; margin: 20px; }
+        h1 { font-size: 18px; margin-bottom: 4px; }
+        .meta { color: #666; font-size: 11px; margin-bottom: 16px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+        th { background: #417690; color: white; font-weight: bold; }
+        tr:nth-child(even) { background: #f9f9f9; }
+        @media print {
+            body { margin: 0; }
+            .no-print { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom: 16px;">
+        <button onclick="window.print()" style="padding: 8px 16px; cursor: pointer; background: #417690; color: white; border: none; border-radius: 4px;">Print</button>
+        <button onclick="window.close()" style="padding: 8px 16px; cursor: pointer; margin-left: 8px;">Close</button>
+    </div>
+    <h1>{{ title }}</h1>
+    <p class="meta">Exported: {{ export_date|date:"Y-m-d" }} | Records: {{ count }}</p>
+    <table>
+        <thead>
+            <tr>
+                {% for h in headers %}
+                <th>{{ h }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in rows %}
+            <tr>
+                {% for cell in row %}
+                <td>{{ cell }}</td>
+                {% endfor %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="{{ headers|length }}" style="text-align:center;color:#666;">No records</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <script>
+        (function() {
+            var btn = document.querySelector('button[onclick="window.print()"]');
+            if (btn && window.location.search.indexOf('autoprint=1') !== -1) {
+                window.print();
+            }
+        })();
+    </script>
+</body>
+</html>

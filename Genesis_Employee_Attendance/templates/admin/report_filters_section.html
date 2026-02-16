@@ -1,0 +1,75 @@
+{% load static %}
+<div class="report-filters-section" style="margin-bottom:1rem;padding:1rem;background:#f8f9fa;border:1px solid #dee2e6;border-radius:4px;">
+    <h4 style="margin-bottom:1rem;">Report Filters</h4>
+    <form method="get" id="reportFiltersForm" action="{{ request.path }}" style="display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;">
+        <input type="hidden" name="employee_id" id="employeeReportIds" value="{{ report_filter_employee_ids }}">
+        <div>
+            <label for="reportFilterStartDate" style="display:block;font-size:12px;margin-bottom:2px;">Start Date & Time</label>
+            <span style="display:inline-flex;gap:4px;">
+                <input type="date" id="reportFilterStartDate" name="start_date" value="{{ report_filter_start_date }}" style="width:130px;padding:4px 8px;">
+                <input type="time" id="reportFilterStartTime" name="start_time" value="{{ report_filter_start_time }}" style="width:90px;padding:4px 8px;">
+            </span>
+        </div>
+        <div>
+            <label for="reportFilterEndDate" style="display:block;font-size:12px;margin-bottom:2px;">End Date & Time</label>
+            <span style="display:inline-flex;gap:4px;">
+                <input type="date" id="reportFilterEndDate" name="end_date" value="{{ report_filter_end_date }}" style="width:130px;padding:4px 8px;">
+                <input type="time" id="reportFilterEndTime" name="end_time" value="{{ report_filter_end_time }}" style="width:90px;padding:4px 8px;">
+            </span>
+        </div>
+        <div>
+            <label for="reportFilterDepartment" style="display:block;font-size:12px;margin-bottom:2px;">Department</label>
+            <select id="reportFilterDepartment" name="department" style="min-width:140px;padding:4px 8px;">
+                <option value="">All Departments</option>
+                {% for dept in report_filter_departments %}
+                <option value="{{ dept }}" {% if report_filter_department == dept %}selected{% endif %}>{{ dept }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div style="position:relative;">
+            <label style="display:block;font-size:12px;margin-bottom:2px;">Employee</label>
+            <div id="employeeReportDropdown" style="position:relative;display:inline-block;">
+                <button type="button" class="employee-report-dropdown-btn" style="min-width:200px;padding:6px 12px;border:1px solid #ccc;background:#fff;cursor:pointer;text-align:left;border-radius:4px;">
+                    <span id="employeeReportTriggerText">All Employees</span> &#9660;
+                </button>
+                <div class="employee-report-dropdown-menu" style="display:none;position:absolute;top:100%;left:0;margin-top:2px;min-width:280px;max-height:320px;overflow-y:auto;background:#fff;border:1px solid #ccc;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);z-index:1000;">
+                    <div style="padding:8px;border-bottom:1px solid #eee;background:#f5f5f5;display:flex;gap:8px;">
+                        <button type="button" id="employeeReportSelectAll" style="padding:4px 10px;font-size:12px;cursor:pointer;border:1px solid #417690;background:#417690;color:#fff;border-radius:3px;">Select All</button>
+                        <button type="button" id="employeeReportClearAll" style="padding:4px 10px;font-size:12px;cursor:pointer;border:1px solid #ccc;background:#fff;border-radius:3px;">Clear All</button>
+                    </div>
+                    <div id="employeeReportCheckboxList" style="padding:4px;"></div>
+                </div>
+            </div>
+        </div>
+        <div>
+            <button type="button" id="generateReportBtn" style="padding:6px 14px;background:#417690;color:#fff;border:none;border-radius:4px;cursor:pointer;">Generate Report</button>
+        </div>
+    </form>
+</div>
+<script id="employeeReportData" type="application/json">{{ report_filter_employees_json|safe }}</script>
+<script>
+(function() {
+    var basePath = "{{ request.path|escapejs }}";
+    var btn = document.getElementById('generateReportBtn');
+    if (btn) {
+        btn.addEventListener('click', function() {
+            var params = [];
+            var startDate = document.getElementById('reportFilterStartDate');
+            var startTime = document.getElementById('reportFilterStartTime');
+            var endDate = document.getElementById('reportFilterEndDate');
+            var endTime = document.getElementById('reportFilterEndTime');
+            var department = document.getElementById('reportFilterDepartment');
+            var employeeIds = document.getElementById('employeeReportIds');
+            if (startDate && startDate.value) params.push('start_date=' + encodeURIComponent(startDate.value));
+            if (startTime && startTime.value) params.push('start_time=' + encodeURIComponent(startTime.value));
+            if (endDate && endDate.value) params.push('end_date=' + encodeURIComponent(endDate.value));
+            if (endTime && endTime.value) params.push('end_time=' + encodeURIComponent(endTime.value));
+            if (department && department.value) params.push('department=' + encodeURIComponent(department.value));
+            if (employeeIds && employeeIds.value) params.push('employee_id=' + encodeURIComponent(employeeIds.value));
+            var qs = params.length ? '?' + params.join('&') : '';
+            window.location.href = basePath + qs;
+        });
+    }
+})();
+</script>
+<script src="{% static 'admin/js/report_filters.js' %}"></script>
