@@ -77,7 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (joinDateRaw != null && joinDateRaw.isNotEmpty) {
       try {
         final d = DateTime.parse(joinDateRaw);
-        joinDateFormatted = DateFormat('d MMM yyyy').format(d);
+        joinDateFormatted = DateFormat('EEEE, d MMM yyyy').format(d);
       } catch (_) {}
     }
     final accountAgeStr = accountAgeDays is int

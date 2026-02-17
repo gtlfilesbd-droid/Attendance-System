@@ -62,8 +62,14 @@ class AuthService {
   }
 
   /// Logout
-  /// Clears all stored data and stops location tracking
+  /// Notifies backend (for audit log), then clears all stored data and stops location tracking
   Future<void> logout() async {
+    // Notify backend first (token still in storage so request is authenticated)
+    try {
+      await ApiService().logout();
+    } catch (_) {
+      // Proceed with local logout even if API call fails (e.g. offline)
+    }
     // Clear secure storage
     await _storage.deleteAll();
     

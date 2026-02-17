@@ -329,6 +329,13 @@
         return day + ' ' + m + '/' + dayNum;
     }
 
+    function formatDateLong(isoStr) {
+        if (!isoStr) return '';
+        const d = new Date(isoStr);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
     // Single source of truth for duty status - used by both cards and graph
     function getDutyStatus(r) {
         if (r.duty_status) return r.duty_status;
@@ -763,7 +770,7 @@
                 const empDetails = record.employee_details || {};
                 const empName = record.employee_name || empDetails.name || 'N/A';
                 const empId = record.employee_id || empDetails.employee_id || '';
-                const dateStr = record.date ? new Date(record.date).toLocaleDateString() : '—';
+                const dateStr = record.date ? formatDateLong(record.date) : '—';
                 const sessions = record.sessions || [];
 
                 let totalSecs = 0;
@@ -847,7 +854,7 @@
                     html += `
                         <tr>
                             ${merged}
-                            <td>${r.date ? new Date(r.date).toLocaleDateString() : '—'}</td>
+                            <td>${r.date ? formatDateLong(r.date) : '—'}</td>
                             <td>${getCheckInDisplay(r)}</td>
                             <td>${getCheckOutDisplay(r)}</td>
                             <td>${getTotalHoursDisplay(r)}</td>
@@ -877,7 +884,7 @@
             groups.forEach(record => {
                 const empName = record.employee_name || (record.employee_details && record.employee_details.name) || 'N/A';
                 const empId = record.employee_id || (record.employee_details && record.employee_details.employee_id) || '';
-                const dateStr = record.date ? new Date(record.date).toLocaleDateString() : '';
+                const dateStr = record.date ? formatDateLong(record.date) : '';
                 const sessions = record.sessions || [];
                 if (sessions.length === 0) {
                     rows.push([serial, empName, empId, dateStr, '—', '—', '—', '—', '—']);
@@ -939,7 +946,7 @@
                         empSerial,
                         groupedByEmp[eid].name,
                         groupedByEmp[eid].empIdStr,
-                        r.date ? new Date(r.date).toLocaleDateString() : '',
+                        r.date ? formatDateLong(r.date) : '',
                         getCheckInDisplay(r) || '—',
                         getCheckOutDisplay(r) || '—',
                         getTotalHoursDisplay(r) || '—',

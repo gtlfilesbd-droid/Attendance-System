@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'employees',
     'tracking',
     'attendance',
+    'audit',
 ]
 
 MIDDLEWARE = [
@@ -128,6 +129,12 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# Dashboard login: allow username or email (same as Admin Panel)
+AUTHENTICATION_BACKENDS = [
+    'config.auth_backends.EmailOrUsernameBackend',
+    'django.contrib.auth.backends.ModelBackend',
+]
+
 
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
@@ -139,6 +146,9 @@ TIME_ZONE = config('TIME_ZONE', default='Asia/Dhaka')
 USE_I18N = True
 
 USE_TZ = True
+
+# Date display format (e.g. Tuesday, 17 Feb 2026) for admin and templates
+DATE_FORMAT = '%A, %d %b %Y'
 
 
 # Static files (CSS, JavaScript, Images)

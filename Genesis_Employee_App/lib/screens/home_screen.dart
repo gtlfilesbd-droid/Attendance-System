@@ -625,7 +625,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              DateFormat('EEEE, MMMM d, y').format(DateTime.now()),
+              DateFormat('EEEE, d MMM yyyy').format(DateTime.now()),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
@@ -801,7 +801,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDutyTimeCard(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
-    final todayLabel = DateFormat('d MMM yyyy').format(DateTime.now());
+    final todayLabel = DateFormat('EEEE, d MMM yyyy').format(DateTime.now());
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),

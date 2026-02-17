@@ -1,8 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:genesis_employee_app/screens/attendance_screen.dart';
+import 'package:genesis_employee_app/services/api_service.dart';
 
 void main() {
+  setUpAll(() {
+    ApiService.mockGetMyAttendance = ({String? startDate, String? endDate}) async => {'by_date': []};
+  });
+
+  tearDownAll(() {
+    ApiService.mockGetMyAttendance = null;
+  });
+
   group('AttendanceScreen widget tests', () {
     testWidgets('displays app bar title', (WidgetTester tester) async {
       await tester.pumpWidget(
@@ -30,8 +39,10 @@ void main() {
           home: AttendanceScreen(),
         ),
       );
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle(const Duration(seconds: 15));
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pump();
 
       expect(find.byType(Scaffold), findsOneWidget);
     });

@@ -90,6 +90,18 @@ def employee_login(request):
         except Exception:
             pass
         # #endregion
+        # Log app login for Admin Panel > User Login Logs
+        try:
+            from django.utils import timezone
+            from audit.models import UserLoginLog
+            UserLoginLog.objects.create(
+                employee=employee,
+                action='LOGIN',
+                source=UserLoginLog.SOURCE_APP,
+                timestamp=timezone.now(),
+            )
+        except Exception:
+            pass
         # Generate JWT tokens
         refresh = RefreshToken.for_user(employee)
         
@@ -114,6 +126,34 @@ def employee_login(request):
         'message': 'Login failed',
         'errors': serializer.errors
     }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def employee_logout(request):
+    """
+    Employee logout endpoint (app). Logs the logout event then client clears token.
+    POST /api/employees/auth/logout/
+    Requires: Bearer token (JWT).
+    """
+    user = request.user
+    if not isinstance(user, Employee):
+        return Response(
+            {'success': False, 'message': 'Not an employee account.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        from django.utils import timezone
+        from audit.models import UserLoginLog
+        UserLoginLog.objects.create(
+            employee=user,
+            action='LOGOUT',
+            source=UserLoginLog.SOURCE_APP,
+            timestamp=timezone.now(),
+        )
+    except Exception:
+        pass
+    return Response({'success': True, 'message': 'Logged out.'}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])

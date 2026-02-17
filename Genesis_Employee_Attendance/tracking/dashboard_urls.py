@@ -1,9 +1,14 @@
 from django.urls import path
-from django.contrib.auth.views import LogoutView
+from django.contrib.auth.views import LoginView, LogoutView
 
 from . import views
 
 urlpatterns = [
+    path("login/", LoginView.as_view(
+        template_name='registration/login.html',
+        redirect_authenticated_user=True,
+        success_url='/dashboard/',
+    ), name='login'),
     path("", views.dashboard_home, name="dashboard-home"),
     path("employee-list/", views.dashboard_employee_list, name="dashboard-employee-list"),
     path("live-tracking/", views.live_tracking_view, name="live-tracking"),

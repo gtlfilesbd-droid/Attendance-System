@@ -26,7 +26,7 @@ User = get_user_model()
 def create_admin_user():
     """Create Django superuser for admin access"""
     username = os.getenv('ADMIN_USERNAME', 'admin')
-    email = os.getenv('ADMIN_EMAIL', 'admin@genesis.com')
+    email = os.getenv('ADMIN_EMAIL', 'admin@gel.com.bd')
     password = os.getenv('ADMIN_PASSWORD', 'admin123')
     
     if User.objects.filter(username=username).exists():

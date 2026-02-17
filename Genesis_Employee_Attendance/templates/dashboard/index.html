@@ -78,7 +78,7 @@
     <div class="col-lg-4">
         <div class="stat-card">
             <h5 class="mb-3">
-                <i class="fas fa-chart-pie me-2"></i>Distribution ({{ selected_date|date:"M d, Y" }})
+                <i class="fas fa-chart-pie me-2"></i>Distribution ({{ selected_date|date:"l, j M Y" }})
             </h5>
             <canvas id="distributionChart" height="200"></canvas>
         </div>
@@ -115,7 +115,7 @@
     <div class="col-md-6">
         <div class="stat-card">
             <h5 class="mb-3">
-                <i class="fas fa-info-circle me-2"></i>Summary ({{ selected_date|date:"M d, Y" }})
+                <i class="fas fa-info-circle me-2"></i>Summary ({{ selected_date|date:"l, j M Y" }})
             </h5>
             <div class="row text-center">
                 <div class="col-4">
@@ -172,7 +172,7 @@
                                     <small class="text-muted">{{ item.att.employee.employee_id }}</small>
                                 </div>
                             </td>
-                            <td>{{ item.att.date|date:"M d, Y" }}</td>
+                            <td>{{ item.att.date|date:"l, j M Y" }}</td>
                             <td>
                                 <span class="badge bg-success">{{ item.check_in_time_str }}</span>
                             </td>

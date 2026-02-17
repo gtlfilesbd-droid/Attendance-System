@@ -13,7 +13,7 @@ def _format_value(val):
     if val is None:
         return ''
     if hasattr(val, 'strftime'):
-        return val.strftime('%Y-%m-%d %H:%M:%S') if hasattr(val, 'hour') else val.strftime('%Y-%m-%d')
+        return val.strftime('%Y-%m-%d %H:%M:%S') if hasattr(val, 'hour') else val.strftime('%A, %d %b %Y')
     if hasattr(val, '__html__'):
         return strip_tags(str(val))
     return str(val)

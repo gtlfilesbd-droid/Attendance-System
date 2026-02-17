@@ -93,16 +93,28 @@
                     </div>
                     {% endfor %}
                 {% endif %}
+                {% if form.non_field_errors %}
+                    <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                        {% for error in form.non_field_errors %}
+                            <p class="mb-0">{{ error }}</p>
+                        {% endfor %}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    </div>
+                {% endif %}
                 
-                <form method="post">
+                <form method="post" action="">
                     {% csrf_token %}
                     
                     <div class="mb-3">
                         <label class="form-label">
-                            <i class="fas fa-envelope"></i> Email Address
+                            <i class="fas fa-user"></i> Username or Email
                         </label>
-                        <input type="email" class="form-control form-control-lg" 
-                               name="username" placeholder="Enter your email" required>
+                        <input type="text" class="form-control form-control-lg" 
+                               name="username" placeholder="Enter your Username or Email" 
+                               value="{{ form.username.value|default:'' }}" autofocus required>
+                        {% if form.username.errors %}
+                            <div class="invalid-feedback d-block">{{ form.username.errors.0 }}</div>
+                        {% endif %}
                     </div>
                     
                     <div class="mb-3">
@@ -111,8 +123,10 @@
                         </label>
                         <input type="password" class="form-control form-control-lg" 
                                name="password" placeholder="Enter your password" required>
+                        {% if form.password.errors %}
+                            <div class="invalid-feedback d-block">{{ form.password.errors.0 }}</div>
+                        {% endif %}
                     </div>
-                    
                     <div class="mb-3 form-check">
                         <input type="checkbox" class="form-check-input" id="remember">
                         <label class="form-check-label" for="remember">

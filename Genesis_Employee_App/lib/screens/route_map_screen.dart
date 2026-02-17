@@ -277,7 +277,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                               Icon(Icons.calendar_today, size: 20, color: colorScheme.primary),
                               const SizedBox(width: 8),
                               Text(
-                                DateFormat('d MMM yyyy').format(_selectedDate),
+                                DateFormat('EEEE, d MMM yyyy').format(_selectedDate),
                                 style: theme.textTheme.titleSmall?.copyWith(
                                   fontWeight: FontWeight.w600,
                                   color: colorScheme.onSurface,
@@ -373,7 +373,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                   : _routePoints.isEmpty
                   ? Center(
                       child: Text(
-                        "No route data for ${DateFormat('d MMM yyyy').format(_selectedDate)}",
+                        "No route data for ${DateFormat('EEEE, d MMM yyyy').format(_selectedDate)}",
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
                       ),

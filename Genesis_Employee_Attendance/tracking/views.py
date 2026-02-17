@@ -899,7 +899,7 @@ def export_csv(request):
     if report_type == 'daily':
         # Daily CSV export
         writer.writerow(['Daily Attendance Report'])
-        writer.writerow(['Date:', reference_date])
+        writer.writerow(['Date:', reference_date.strftime('%A, %d %b %Y')])
         if department:
             writer.writerow(['Department:', department])
         writer.writerow([])
@@ -957,7 +957,7 @@ def export_csv(request):
         while current_date <= end_date:
             summary = DailyAttendanceSummarySerializer.get_daily_summary(current_date)
             writer.writerow([
-                current_date,
+                current_date.strftime('%A, %d %b %Y'),
                 summary['total_employees'],
                 summary['present_count'],
                 summary['late_count'],
@@ -1019,7 +1019,7 @@ def export_csv(request):
         
         for att in queryset.order_by('date', 'employee__name'):
             writer.writerow([
-                att.date,
+                att.date.strftime('%A, %d %b %Y'),
                 att.employee.employee_id,
                 att.employee.name,
                 att.employee.department.name if att.employee.department else '—',

@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils import timezone
 from config.admin_export import AdminExportMixin
 from .models import Attendance, DutySession
 from .admin_filters import format_time_12h, format_total_hours_hhmmss
@@ -8,7 +9,7 @@ from .admin_filters import format_time_12h, format_total_hours_hhmmss
 class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
     change_list_template = 'admin/attendance/attendance/change_list.html'
     list_display = [
-        'id', 'employee', 'date', 'status',
+        'id', 'employee', 'formatted_date', 'status',
         'formatted_check_in_time', 'formatted_check_out_time',
         'formatted_total_hours', 'total_locations_logged',
         'get_check_in_location', 'get_check_out_location',
@@ -44,6 +45,11 @@ class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('employee')
+
+    def formatted_date(self, obj):
+        return obj.date.strftime('%A, %d %b %Y') if obj.date else '—'
+    formatted_date.short_description = 'Date'
+    formatted_date.admin_order_field = 'date'
 
     def formatted_check_in_time(self, obj):
         return format_time_12h(obj.check_in_time)
@@ -92,7 +98,7 @@ class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
 class DutySessionAdmin(AdminExportMixin, admin.ModelAdmin):
     change_list_template = 'admin/attendance/dutysession/change_list.html'
     list_display = [
-        'id', 'employee', 'date',
+        'id', 'employee', 'formatted_date',
         'formatted_start_time', 'formatted_end_time',
         'formatted_total_hours',
         'get_start_location', 'get_end_location',
@@ -106,13 +112,18 @@ class DutySessionAdmin(AdminExportMixin, admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('employee')
 
+    def formatted_date(self, obj):
+        return obj.date.strftime('%A, %d %b %Y') if obj.date else '—'
+    formatted_date.short_description = 'Date'
+    formatted_date.admin_order_field = 'date'
+
     def formatted_start_time(self, obj):
-        return format_time_12h(obj.start_time)
+        return format_time_12h(timezone.localtime(obj.start_time) if obj.start_time else None)
     formatted_start_time.short_description = 'Start Time'
     formatted_start_time.admin_order_field = 'start_time'
 
     def formatted_end_time(self, obj):
-        return format_time_12h(obj.end_time)
+        return format_time_12h(timezone.localtime(obj.end_time) if obj.end_time else None)
     formatted_end_time.short_description = 'End Time'
     formatted_end_time.admin_order_field = 'end_time'
 

@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.gis.admin import OSMGeoAdmin
+from django.utils import timezone
 from config.admin_export import AdminExportMixin
 from .models import LocationLog
 from attendance.admin_filters import format_time_12h
@@ -36,11 +37,14 @@ class LocationLogAdmin(AdminExportMixin, OSMGeoAdmin):
         return super().get_queryset(request).select_related('employee')
 
     def formatted_date(self, obj):
-        return obj.timestamp.strftime('%Y-%m-%d') if obj.timestamp else '—'
+        if obj.timestamp:
+            local_ts = timezone.localtime(obj.timestamp)
+            return local_ts.strftime('%A, %d %b %Y')
+        return '—'
     formatted_date.short_description = 'Date'
     formatted_date.admin_order_field = 'timestamp'
 
     def formatted_timestamp(self, obj):
-        return format_time_12h(obj.timestamp) if obj.timestamp else '—'
+        return format_time_12h(timezone.localtime(obj.timestamp) if obj.timestamp else None)
     formatted_timestamp.short_description = 'Timestamp'
     formatted_timestamp.admin_order_field = 'timestamp'

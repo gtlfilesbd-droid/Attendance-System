@@ -5,6 +5,7 @@ class AppConfig {
   
   // API Endpoints
   static const String loginEndpoint = '/employees/auth/login/';
+  static const String logoutEndpoint = '/employees/auth/logout/';
   static const String tokenRefreshEndpoint = '/auth/token/refresh/';
   static const String locationLogEndpoint = '/tracking/log-location/';
   static const String myAttendanceEndpoint = '/attendance/my-attendance/';

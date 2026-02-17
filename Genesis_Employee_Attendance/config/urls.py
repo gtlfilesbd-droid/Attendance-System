@@ -7,8 +7,10 @@ import config.admin  # noqa: F401 - re-registers User/Group with export mixin
 admin.site.site_header = 'Genesis Administration'
 admin.site.site_title = 'Genesis Administration'
 admin.site.index_title = 'Genesis Administration'
+admin.site.site_url = '/dashboard/'
 from django.contrib.auth.views import LogoutView
 from django.urls import path, include
+from django.views.generic import RedirectView
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework_simplejwt.views import (
@@ -19,6 +21,7 @@ from rest_framework_simplejwt.views import (
 from .views import api_root
 
 urlpatterns = [
+    path('', RedirectView.as_view(url='/dashboard/', permanent=False)),
     path('admin/', admin.site.urls),
     
     # API Root

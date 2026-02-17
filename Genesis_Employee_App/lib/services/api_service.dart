@@ -16,6 +16,9 @@ class ApiService {
   /// Test-only: when set, getMyProfile() returns this instead of calling the API.
   static Future<Map<String, dynamic>?> Function()? mockGetMyProfile;
 
+  /// Test-only: when set, getMyAttendance() returns this instead of calling the API.
+  static Future<Map<String, dynamic>> Function({String? startDate, String? endDate})? mockGetMyAttendance;
+
   final Dio _dio = Dio();
   
   void initialize() {
@@ -111,6 +114,16 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   /// Login Method
+  /// POST /employees/auth/logout/ - notify backend for audit log (call before clearing token).
+  Future<void> logout() async {
+    try {
+      ApiService().initialize();
+      await _dio.post(AppConfig.logoutEndpoint);
+    } on Exception catch (_) {
+      // Best effort; do not block logout if offline or token expired
+    }
+  }
+
   /// POST /employees/auth/login/
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
@@ -352,6 +365,9 @@ class ApiService {
     String? startDate,
     String? endDate,
   }) async {
+    if (mockGetMyAttendance != null) {
+      return mockGetMyAttendance!(startDate: startDate, endDate: endDate);
+    }
     try {
       final queryParams = <String, dynamic>{};
       if (startDate != null) queryParams['start_date'] = startDate;
