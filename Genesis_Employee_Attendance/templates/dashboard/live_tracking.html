@@ -129,8 +129,8 @@
         <div class="alert alert-info d-flex align-items-center">
             <i class="fas fa-info-circle me-2"></i>
             <div>
-                <strong>Auto-refresh enabled:</strong> Locations are automatically updated every 30 seconds.
-                <span class="badge bg-primary ms-2" id="refreshTimer">30s</span>
+                <strong>Auto-refresh enabled:</strong> Locations are automatically updated every {{ poll_interval_seconds }} seconds.
+                <span class="badge bg-primary ms-2" id="refreshTimer">{{ poll_interval_seconds }}s</span>
             </div>
         </div>
     </div>

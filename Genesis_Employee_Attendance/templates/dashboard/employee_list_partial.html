@@ -17,6 +17,7 @@
                 <th>Current Duty Hours</th>
                 {% elif filter_type == 'off_duty' %}
                 <th>Start Time</th>
+                <th>Start Location</th>
                 <th>End Time</th>
                 <th>End Location</th>
                 <th>Speed</th>
@@ -44,6 +45,7 @@
                 <td><strong>{{ emp.current_duty_hours }}</strong></td>
                 {% elif filter_type == 'off_duty' %}
                 <td>{{ emp.start_time }}</td>
+                <td><small>{{ emp.start_location }}</small></td>
                 <td>{{ emp.end_time }}</td>
                 <td><small>{{ emp.end_location }}</small></td>
                 <td>{{ emp.speed }}</td>

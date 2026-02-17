@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import urllib.request
+import urllib.parse
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.response import Response
@@ -49,6 +51,30 @@ def _seconds_to_hhmmss(total_seconds):
         return f"{hrs:02d}:{mins:02d}:{secs:02d}"
     except (TypeError, ValueError):
         return '—'
+
+
+def _reverse_geocode(lat, lon):
+    """
+    Reverse geocode lat/lon to a place name using OpenStreetMap Nominatim.
+    Returns a string (display_name) or None on failure. Result is truncated to 500 chars for DB.
+    """
+    if lat is None or lon is None:
+        return None
+    try:
+        url = 'https://nominatim.openstreetmap.org/reverse?' + urllib.parse.urlencode({
+            'lat': lat,
+            'lon': lon,
+            'format': 'json',
+        })
+        req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            name = data.get('display_name')
+            if name and isinstance(name, str):
+                return name.strip()[:500]
+    except Exception as e:
+        logger.debug('reverse_geocode failed: %s', e)
+    return None
 
 
 def _get_time_ago(timestamp):
@@ -118,6 +144,11 @@ def log_location(request):
 
         if serializer.is_valid():
             location_log = serializer.save()
+            if not (location_log.address and location_log.address.strip()):
+                addr = _reverse_geocode(location_log.latitude, location_log.longitude)
+                if addr:
+                    location_log.address = addr
+                    location_log.save(update_fields=['address'])
             logger.debug("log_location: location saved id=%s", location_log.id)
             logger.info(
                 "log_location: created location_log_id=%s employee_id=%s",
@@ -185,21 +216,45 @@ def live_locations(request):
             if location and location.employee.is_active:
                 ts = location.timestamp
                 ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+                employee = location.employee
+                profile_picture_url = None
+                if employee.profile_picture:
+                    try:
+                        profile_picture_url = request.build_absolute_uri(employee.profile_picture.url)
+                    except Exception:
+                        profile_picture_url = None
+                address = (location.address or '').strip()
+                if not address:
+                    addr = _reverse_geocode(location.latitude, location.longitude)
+                    if addr:
+                        location.address = addr
+                        location.save(update_fields=['address'])
+                        address = addr
+                if not address and employee:
+                    from attendance.models import DutySession
+                    open_session = DutySession.objects.filter(
+                        employee=employee, date=timezone.localdate(), end_time__isnull=True
+                    ).order_by('-start_time').first()
+                    if open_session and open_session.start_address:
+                        address = open_session.start_address
+                        location.address = address
+                        location.save(update_fields=['address'])
                 locations.append({
-                    'employee_id': str(location.employee.id),
-                    'employee_name': location.employee.name,
-                    'employee_code': location.employee.employee_id,
-                    'department': location.employee.department.name if location.employee.department else '—',
-                    'designation': location.employee.designation.name if location.employee.designation else '—',
+                    'employee_id': str(employee.id),
+                    'employee_name': employee.name,
+                    'employee_code': employee.employee_id,
+                    'department': employee.department.name if employee.department else '—',
+                    'designation': employee.designation.name if employee.designation else '—',
                     'latitude': location.latitude,
                     'longitude': location.longitude,
                     'accuracy': location.accuracy,
                     'battery_level': location.battery_level,
                     'speed': location.speed,
-                    'address': location.address or '',
+                    'address': address or '',
                     'timestamp': ts_iso,
                     'last_update': _get_time_ago(location.timestamp),
                     'minutes_ago': int((timezone.now() - location.timestamp).total_seconds() / 60),
+                    'profile_picture_url': profile_picture_url,
                 })
 
         # Format for Leaflet.js/OpenStreetMap (and flat-list consumers)
@@ -221,6 +276,7 @@ def live_locations(request):
                 'battery_level': loc.get('battery_level'),
                 'speed': loc.get('speed'),
                 'address': loc.get('address', ''),
+                'profile_picture_url': loc.get('profile_picture_url'),
             })
 
         return Response({
@@ -747,6 +803,7 @@ def dashboard_employee_list(request):
                 employee=emp, date=selected_date, end_time__isnull=False
             ).order_by('-end_time').first()
             end_location = (last_closed.end_address if last_closed and last_closed.end_address else '—')
+            start_location = (first_session.start_address if first_session and first_session.start_address else '—')
             total_seconds = 0
             for sess in DutySession.objects.filter(employee=emp, date=selected_date, end_time__isnull=False):
                 total_seconds += int((sess.end_time - sess.start_time).total_seconds())
@@ -761,6 +818,7 @@ def dashboard_employee_list(request):
                 'employee_id': emp.employee_id,
                 'department': emp.department.name if emp.department else '—',
                 'start_time': timezone.localtime(first_session.start_time).strftime('%I:%M:%S %p') if first_session else '—',
+                'start_location': start_location or '—',
                 'end_time': timezone.localtime(last_closed.end_time).strftime('%I:%M:%S %p') if last_closed and last_closed.end_time else '—',
                 'end_location': end_location or '—',
                 'speed': f'{speed:.2f} m/s' if speed is not None else '—',
@@ -803,8 +861,10 @@ def live_tracking_view(request):
     Template: dashboard/live_tracking.html
     JavaScript polls live locations every 10 seconds for snappier updates during duty.
     """
+    poll_interval_ms = 10000
     context = {
-        'poll_interval_ms': 10000,
+        'poll_interval_ms': poll_interval_ms,
+        'poll_interval_seconds': poll_interval_ms // 1000,
     }
     return render(request, 'dashboard/live_tracking.html', context)
 
