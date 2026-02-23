@@ -4,6 +4,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import '../config/app_config.dart';
 import 'api_service.dart';
+import 'duty_reminder_service.dart';
+import 'push_notification_service.dart';
 
 class AuthService {
   // Singleton pattern
@@ -51,7 +53,12 @@ class AuthService {
             await _storage.write(key: AppConfig.employeeEmailKey, value: employee['email']);
           }
         }
-        
+
+        // Register FCM token for duty reminder push (9:00 and 9:28)
+        try {
+          await PushNotificationService().registerFCMToken();
+        } catch (_) {}
+
         return true;
       }
       return false;
@@ -78,6 +85,8 @@ class AuthService {
     if (await service.isRunning()) {
       service.invoke("stopService");
     }
+    // Cancel scheduled duty reminders
+    await DutyReminderService().cancelAll();
   }
 
   /// Check if user is logged in

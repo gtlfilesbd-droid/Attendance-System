@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.utils.safestring import mark_safe
 from config.admin_export import AdminExportMixin
-from .models import Employee, Department, Designation
+from .models import Employee, Department, Designation, DeviceToken
 
 
 @admin.register(Department)
@@ -18,6 +18,14 @@ class DesignationAdmin(AdminExportMixin, admin.ModelAdmin):
     list_filter = ['is_active']
     search_fields = ['name', 'description']
     ordering = ['name']
+
+
+@admin.register(DeviceToken)
+class DeviceTokenAdmin(admin.ModelAdmin):
+    list_display = ['employee', 'platform', 'created_at', 'updated_at']
+    list_filter = ['platform']
+    search_fields = ['employee__name', 'employee__email', 'fcm_token']
+    readonly_fields = ['created_at', 'updated_at']
 
 
 @admin.register(Employee)

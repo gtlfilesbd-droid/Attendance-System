@@ -8,7 +8,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework_simplejwt.tokens import RefreshToken
 from django_filters.rest_framework import DjangoFilterBackend
 from django.shortcuts import get_object_or_404
-from .models import Employee
+from .models import Employee, DeviceToken
 from .serializers import (
     EmployeeSerializer, EmployeeLoginSerializer, EmployeeProfileSerializer
 )
@@ -154,6 +154,37 @@ def employee_logout(request):
     except Exception:
         pass
     return Response({'success': True, 'message': 'Logged out.'}, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def register_device(request):
+    """
+    Register FCM token for push notifications (duty reminders).
+    POST /api/employees/auth/register-device/
+    Body: { "fcm_token": "...", "platform": "android" }
+    Requires: Bearer token (employee JWT).
+    """
+    user = request.user
+    if not isinstance(user, Employee):
+        return Response(
+            {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    fcm_token = (request.data or {}).get('fcm_token')
+    platform = (request.data or {}).get('platform', 'android')
+    if not fcm_token or not isinstance(fcm_token, str) or not fcm_token.strip():
+        return Response(
+            {'success': False, 'message': 'fcm_token is required.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    platform = platform if platform in ('android', 'ios') else 'android'
+    token_str = fcm_token.strip()
+    DeviceToken.objects.update_or_create(
+        fcm_token=token_str,
+        defaults={'employee': user, 'platform': platform},
+    )
+    return Response({'success': True, 'message': 'Device registered for notifications.'}, status=status.HTTP_200_OK)
 
 
 @api_view(['POST'])

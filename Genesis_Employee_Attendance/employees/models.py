@@ -122,3 +122,37 @@ class Employee(models.Model):
         if self.password and not self.password.startswith('pbkdf2_'):
             self.set_password(self.password)
         super().save(*args, **kwargs)
+
+
+class DeviceToken(models.Model):
+    """
+    FCM token for push notifications. One employee can have multiple devices.
+    """
+    PLATFORM_ANDROID = 'android'
+    PLATFORM_IOS = 'ios'
+    PLATFORM_CHOICES = [
+        (PLATFORM_ANDROID, 'Android'),
+        (PLATFORM_IOS, 'iOS'),
+    ]
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='device_tokens',
+    )
+    fcm_token = models.CharField(max_length=512, unique=True, db_index=True)
+    platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES, default=PLATFORM_ANDROID)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'employee_device_tokens'
+        ordering = ['-updated_at']
+        verbose_name = 'Device Token'
+        verbose_name_plural = 'Device Tokens'
+        indexes = [
+            models.Index(fields=['employee', 'platform']),
+        ]
+
+    def __str__(self):
+        return f"{self.employee.name} ({self.platform})"

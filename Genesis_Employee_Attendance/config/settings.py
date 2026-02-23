@@ -338,8 +338,22 @@ CELERY_BEAT_SCHEDULE = {
             'expires': 7200,  # Task expires after 2 hours
         }
     },
+    # Duty reminder push notifications (9:00 and 9:28 Asia/Dhaka, every day except Friday)
+    'send-duty-reminder-9am': {
+        'task': 'tracking.send_duty_reminder_notification',
+        'schedule': crontab(minute=0, hour=9, day_of_week='0-4,6'),
+        'args': ('early',),
+    },
+    'send-duty-reminder-928am': {
+        'task': 'tracking.send_duty_reminder_notification',
+        'schedule': crontab(minute=28, hour=9, day_of_week='0-4,6'),
+        'args': ('late',),
+    },
 }
 
+
+# Firebase (FCM) for duty reminder push notifications
+FIREBASE_CREDENTIALS_PATH = config('FIREBASE_CREDENTIALS_PATH', default='')
 
 # Email Configuration (Optional)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

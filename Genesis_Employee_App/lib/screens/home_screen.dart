@@ -11,6 +11,7 @@ import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/api_service.dart';
+import '../services/push_notification_service.dart';
 import 'attendance_screen.dart';
 import 'route_map_screen.dart';
 import 'profile_screen.dart';
@@ -116,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadData();
+    PushNotificationService().registerFCMToken();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _startTimer();

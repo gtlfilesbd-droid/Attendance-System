@@ -12,6 +12,7 @@ class AppConfig {
   static const String startDutyEndpoint = '/attendance/start-duty/';
   static const String endDutyEndpoint = '/attendance/end-duty/';
   static const String employeeProfileEndpoint = '/employees/me/';
+  static const String registerDeviceEndpoint = '/employees/auth/register-device/';
   
   // Location Tracking Configuration
   static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)

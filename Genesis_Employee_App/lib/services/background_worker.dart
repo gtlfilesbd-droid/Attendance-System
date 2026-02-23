@@ -18,15 +18,15 @@ import 'api_service.dart';
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
     print("WORKMANAGER: Task $task started");
-    
+
     if (task == 'check_tracking_schedule') {
       // Only stop the service when outside working hours (for when real hours are enabled).
       // Never start the service here.
       if (!LocationService.isWorkingHoursStatic()) {
         final service = FlutterBackgroundService();
         if (await service.isRunning()) {
-           print("WORKMANAGER: Stopping background service (outside hours)");
-           service.invoke("stopService");
+          print("WORKMANAGER: Stopping background service (outside hours)");
+          service.invoke("stopService");
         }
       }
     }

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "872690352636",
+    "project_id": "genesis-employee",
+    "storage_bucket": "genesis-employee.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:872690352636:android:055cf7c114f3a8e040f279",
+        "android_client_info": {
+          "package_name": "com.genesis.employee_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBPrWAdbmT-zLSV8i_ipKRmRjgZw5KWrbE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -301,6 +301,126 @@ def cleanup_old_locations():
         }
 
 
+@shared_task(name='tracking.send_duty_reminder_notification')
+def send_duty_reminder_notification(message_type):
+    """
+    Send duty reminder push notification to all active employees via FCM.
+    message_type: 'early' (9:00) or 'late' (9:28).
+    Runs at 9:00 and 9:28 Asia/Dhaka, Mon-Thu and Sat-Sun (Friday excluded by Celery Beat).
+    """
+    from employees.models import Employee, DeviceToken
+    from django.conf import settings
+    import os
+
+    MESSAGES = {
+        'early': {
+            'title': 'Genesis',
+            'body': 'Your duty starts at 9:30 AM. Please be on time.',
+        },
+        'late': {
+            'title': 'Genesis',
+            'body': 'Duty starts at 9:30 AM. Be ready.',
+        },
+    }
+    if message_type not in MESSAGES:
+        logger.warning(f"send_duty_reminder_notification: invalid message_type={message_type}")
+        return {'status': 'error', 'message': 'Invalid message_type'}
+
+    payload = MESSAGES[message_type]
+    logger.info(f"Starting duty reminder push (message_type={message_type})...")
+
+    active_employee_ids = list(
+        Employee.objects.filter(is_active=True).values_list('id', flat=True)
+    )
+    tokens_qs = DeviceToken.objects.filter(employee_id__in=active_employee_ids)
+    tokens = list(tokens_qs.values_list('fcm_token', flat=True))
+
+    if not tokens:
+        logger.info("No FCM tokens registered. Skipping duty reminder push.")
+        return {
+            'status': 'completed',
+            'message_type': message_type,
+            'tokens_sent': 0,
+            'timestamp': timezone.now().isoformat(),
+        }
+
+    cred_path = getattr(
+        settings,
+        'FIREBASE_CREDENTIALS_PATH',
+        os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'),
+    )
+    if not cred_path or not os.path.isfile(cred_path):
+        logger.error("Firebase credentials not found. Set FIREBASE_CREDENTIALS_PATH or GOOGLE_APPLICATION_CREDENTIALS.")
+        return {
+            'status': 'error',
+            'message': 'Firebase credentials not configured',
+            'timestamp': timezone.now().isoformat(),
+        }
+
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+
+        sent = 0
+        invalid_tokens = []
+
+        for token in tokens:
+            try:
+                msg = messaging.Message(
+                    notification=messaging.Notification(
+                        title=payload['title'],
+                        body=payload['body'],
+                    ),
+                    android=messaging.AndroidConfig(
+                        priority='high',
+                        notification=messaging.AndroidNotification(
+                            channel_id='duty_reminder',
+                            title=payload['title'],
+                            body=payload['body'],
+                            priority='high',
+                        ),
+                    ),
+                    token=token,
+                )
+                messaging.send(msg)
+                sent += 1
+            except messaging.UnregisteredError:
+                invalid_tokens.append(token)
+            except messaging.InvalidArgumentError:
+                invalid_tokens.append(token)
+            except Exception as e:
+                logger.warning(f"FCM send failed for token {token[:20]}...: {e}")
+                if 'not-registered' in str(e).lower() or 'invalid' in str(e).lower():
+                    invalid_tokens.append(token)
+
+        if invalid_tokens:
+            DeviceToken.objects.filter(fcm_token__in=invalid_tokens).delete()
+            logger.info(f"Removed {len(invalid_tokens)} invalid FCM tokens")
+
+        summary = {
+            'status': 'completed',
+            'message_type': message_type,
+            'tokens_sent': sent,
+            'tokens_invalid_removed': len(invalid_tokens),
+            'timestamp': timezone.now().isoformat(),
+        }
+        logger.info(f"Duty reminder push completed: {summary}")
+        return summary
+
+    except Exception as e:
+        logger.exception(f"Duty reminder push failed: {e}")
+        return {
+            'status': 'error',
+            'message_type': message_type,
+            'error': str(e),
+            'timestamp': timezone.now().isoformat(),
+        }
+
+
 @shared_task(name='tracking.test_task')
 def test_task():
     """

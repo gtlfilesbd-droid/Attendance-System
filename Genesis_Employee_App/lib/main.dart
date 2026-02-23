@@ -5,10 +5,11 @@ import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
 import 'services/location_service.dart';
 import 'services/api_service.dart';
+import 'services/push_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Set preferred orientations
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -20,7 +21,15 @@ void main() async {
 
   // Initialize Background Service
   await LocationService().initializeService();
-  
+
+  // Initialize Firebase for FCM (duty reminder push when app is closed)
+  try {
+    await PushNotificationService.initialize();
+  } catch (e) {
+    // If google-services.json is missing, app still runs; add file for push
+    assert(true, 'Firebase init skipped: $e');
+  }
+
   runApp(const GenesisEmployeeApp());
 }
 
