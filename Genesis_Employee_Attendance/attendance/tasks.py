@@ -6,7 +6,7 @@ from decimal import Decimal
 from celery import shared_task
 from django.utils import timezone
 from django.db.models import Q, Sum
-from datetime import timedelta
+from datetime import timedelta, time, datetime
 from .models import DutySession, Attendance
 from .utils import calculate_duration_seconds
 from employees.models import Employee
@@ -233,9 +233,11 @@ def auto_end_duty_sessions():
         if timezone.is_naive(session_start):
             session_start = timezone.make_aware(session_start, timezone.get_current_timezone())
 
-        # Priority 1: Date change
+        # Priority 1: Date change (end_time = end of session.date 23:59:59; end location = last location)
         if session.date < today:
             remark = "Date changes."
+            end_of_day_naive = datetime.combine(session.date, time(23, 59, 59))
+            auto_close_end_time = timezone.make_aware(end_of_day_naive, timezone.get_current_timezone())
 
         # Priority 2: 9 hours active (timezone-safe duration)
         elif remark is None and (now - session_start).total_seconds() >= nine_hours_secs:
