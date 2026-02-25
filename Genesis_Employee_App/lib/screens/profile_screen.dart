@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/foreground_refresh_service.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -15,10 +16,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final AuthService _authService = AuthService();
   Map<String, dynamic>? _employeeData;
   bool _isLoading = true;
+  String? _loadError;
 
   @override
   void initState() {
     super.initState();
+    ForegroundRefreshService().addListener(_onForegroundRefresh);
+    _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    ForegroundRefreshService().removeListener(_onForegroundRefresh);
+    super.dispose();
+  }
+
+  void _onForegroundRefresh() {
+    if (!mounted) return;
     _loadProfile();
   }
 
@@ -36,6 +50,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _employeeData = profile;
         _isLoading = false;
+        _loadError = (data == null && profile == null)
+            ? "Could not load profile. Check connection."
+            : null;
       });
     }
   }
@@ -64,6 +81,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return Scaffold(
         backgroundColor: colorScheme.surfaceContainerLowest,
         body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_loadError != null && _employeeData == null) {
+      return Scaffold(
+        backgroundColor: colorScheme.surfaceContainerLowest,
+        appBar: AppBar(title: const Text('My Profile'), elevation: 0),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  _loadError!,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.error),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() => _loadError = null);
+                    _loadProfile();
+                  },
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
     }
 

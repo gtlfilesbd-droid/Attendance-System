@@ -255,20 +255,37 @@ class LocationService {
       
       for (String jsonStr in offlineData) {
         try {
-          final data = jsonDecode(jsonStr);
+          final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+          final lat = data['latitude'];
+          final lng = data['longitude'];
+          final acc = data['accuracy'];
+          final bat = data['battery_level'];
+          if (lat == null || lng == null || acc == null || bat == null) {
+            remainingData.add(jsonStr);
+            continue;
+          }
+          final latitude = (lat is num) ? lat.toDouble() : null;
+          final longitude = (lng is num) ? lng.toDouble() : null;
+          final accuracy = (acc is num) ? acc.toDouble() : null;
+          final batteryLevel = (bat is int) ? bat : (bat is num ? bat.toInt() : null);
+          if (latitude == null || longitude == null || accuracy == null || batteryLevel == null) {
+            remainingData.add(jsonStr);
+            continue;
+          }
+          final speed = data['speed'] is num ? (data['speed'] as num).toDouble() : null;
+          final timestamp = data['timestamp'] is String ? data['timestamp'] as String? : null;
           final success = await ApiService().logLocation(
-             latitude: data['latitude'], 
-             longitude: data['longitude'], 
-             accuracy: data['accuracy'], 
-             batteryLevel: data['battery_level'],
-             speed: data['speed']
+            latitude: latitude,
+            longitude: longitude,
+            accuracy: accuracy,
+            batteryLevel: batteryLevel,
+            speed: speed,
+            timestamp: timestamp,
           );
-          
           if (!success) {
-             remainingData.add(jsonStr);
+            remainingData.add(jsonStr);
           }
         } catch (e) {
-          // Failed again, keep it
           remainingData.add(jsonStr);
         }
       }

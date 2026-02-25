@@ -183,12 +183,14 @@ class ApiService {
   /// Log Location
   /// POST /tracking/log-location/
   /// Sends employee UUID when available so backend can associate the location.
+  /// [timestamp] optional ISO8601 string; when syncing offline points pass original capture time.
   Future<bool> logLocation({
     required double latitude,
     required double longitude,
     required double accuracy,
     required int batteryLevel,
     double? speed,
+    String? timestamp,
   }) async {
     try {
       final employeeData = await AuthService().getEmployeeData();
@@ -200,7 +202,7 @@ class ApiService {
         'accuracy': accuracy,
         'battery_level': batteryLevel,
         'speed': speed,
-        'timestamp': DateTime.now().toIso8601String(),
+        'timestamp': timestamp ?? DateTime.now().toIso8601String(),
       };
       if (employeeId != null && employeeId.isNotEmpty) {
         payload['employee'] = employeeId;
@@ -294,7 +296,7 @@ class ApiService {
       return [];
     } catch (e) {
       print('API: getMyRoute error: $e');
-      return [];
+      rethrow;
     }
   }
 
@@ -407,10 +409,13 @@ class ApiService {
       if (response.statusCode == 200 && response.data['success'] == true) {
         return response.data['data'] as Map<String, dynamic>;
       }
-      return {};
+      return {'by_date': []};
     } catch (e) {
       print('API: getMyAttendance error: $e');
-      return {};
+      return {
+        'by_date': [],
+        'error': "Couldn't load attendance. Check connection.",
+      };
     }
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/api_service.dart';
+import '../services/foreground_refresh_service.dart';
+import '../services/location_service.dart';
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -22,9 +24,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    ForegroundRefreshService().addListener(_onForegroundRefresh);
     final now = DateTime.now();
     _filterEndDate = DateTime(now.year, now.month, now.day);
     _filterStartDate = _filterEndDate.subtract(const Duration(days: 30));
+    _fetchAttendance();
+  }
+
+  @override
+  void dispose() {
+    ForegroundRefreshService().removeListener(_onForegroundRefresh);
+    super.dispose();
+  }
+
+  void _onForegroundRefresh() {
+    if (!mounted) return;
     _fetchAttendance();
   }
 
@@ -42,6 +56,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (mounted) {
       setState(() {
         _isLoading = false;
+        _errorMessage = result['error'] as String? ?? '';
         if (result.containsKey('by_date') && result['by_date'] is List) {
           _byDate = List<dynamic>.from(result['by_date'] as List);
         } else {
@@ -53,6 +68,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _onRefresh() async {
     ApiService().initialize();
+    await LocationService.syncOfflineData();
     await _fetchAttendance();
   }
 
@@ -290,9 +306,24 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : _errorMessage.isNotEmpty
                     ? Center(
-                        child: Text(
-                          _errorMessage,
-                          style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.error),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                _errorMessage,
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.error),
+                              ),
+                              const SizedBox(height: 16),
+                              ElevatedButton.icon(
+                                onPressed: _isLoading ? null : () => _fetchAttendance(),
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          ),
                         ),
                       )
                     : _byDate.isEmpty

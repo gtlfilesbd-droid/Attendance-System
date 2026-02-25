@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/foreground_refresh_service.dart';
 import '../utils/route_processing.dart';
 
 class RouteMapScreen extends StatefulWidget {
@@ -34,6 +35,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   TimeOfDay _endTime = const TimeOfDay(hour: 23, minute: 59);
   String? _loadError;
   bool _isRefreshing = false;
+  int _fetchRouteRequestId = 0;
 
   void _zoomIn() {
     final camera = _mapController.camera;
@@ -50,6 +52,18 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   @override
   void initState() {
     super.initState();
+    ForegroundRefreshService().addListener(_onForegroundRefresh);
+    _fetchRoute();
+  }
+
+  @override
+  void dispose() {
+    ForegroundRefreshService().removeListener(_onForegroundRefresh);
+    super.dispose();
+  }
+
+  void _onForegroundRefresh() {
+    if (!mounted) return;
     _fetchRoute();
   }
 
@@ -65,15 +79,17 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   }
 
   Future<void> _fetchRoute() async {
+    final requestId = ++_fetchRouteRequestId;
     setState(() {
       _isLoading = true;
       _loadError = null;
     });
 
     final employeeData = await AuthService().getEmployeeData();
+    if (requestId != _fetchRouteRequestId) return;
     final employeeId = employeeData?['id']?.toString() ?? employeeData?['employee_id']?.toString();
     if (employeeId == null || employeeId.isEmpty) {
-      if (mounted) {
+      if (mounted && requestId == _fetchRouteRequestId) {
         setState(() {
           _isLoading = false;
           _loadError = 'Unable to load route';
@@ -89,13 +105,28 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final startTimeStr = _timeOfDayToHhMmSs(_startTime);
     final endTimeStr = _timeOfDayToHhMmSs(_endTime);
-    final locations = await _apiService.getMyRoute(
-      employeeId: employeeId,
-      date: dateStr,
-      startTime: startTimeStr,
-      endTime: endTimeStr,
-    );
-    if (!mounted) return;
+    List<dynamic> locations;
+    try {
+      locations = await _apiService.getMyRoute(
+        employeeId: employeeId,
+        date: dateStr,
+        startTime: startTimeStr,
+        endTime: endTimeStr,
+      );
+    } catch (e) {
+      if (mounted && requestId == _fetchRouteRequestId) {
+        setState(() {
+          _isLoading = false;
+          _loadError = "Couldn't load route. Check connection.";
+          _routePoints = [];
+          _markers = [];
+          _totalDistanceKm = 0;
+          _rawPointsCount = 0;
+        });
+      }
+      return;
+    }
+    if (!mounted || requestId != _fetchRouteRequestId) return;
 
     // Process route: filter, dedupe, smooth; get points and distance for display
     final processed = processRouteForDisplay(locations);
@@ -150,7 +181,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       );
     }
 
-    if (mounted) {
+    if (mounted && requestId == _fetchRouteRequestId) {
       setState(() {
         _routePoints = points;
         _markers = markers;
@@ -394,60 +425,96 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
             ),
           ),
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _loadError != null
-                  ? Center(child: Text(_loadError!, style: TextStyle(color: colorScheme.error)))
-                  : _routePoints.isEmpty
-                  ? Center(
-                      child: Text(
-                        "No route data for ${DateFormat('EEEE, d MMM yyyy').format(_selectedDate)}",
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
-                      ),
-                    )
-                  : Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        FlutterMap(
-                          mapController: _mapController,
-                          options: MapOptions(
-                            initialCenter: _routePoints.isNotEmpty 
-                                ? _routePoints.last 
-                                : const LatLng(23.8103, 90.4125),
-                            initialZoom: 13.0,
-                            onPositionChanged: (camera, hasGesture) {
-                              if (mounted) {
-                                setState(() {
-                                  _currentZoom = camera.zoom ?? _currentZoom;
-                                });
-                              }
-                            },
-                          ),
-                          children: [
-                            TileLayer(
-                              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                              userAgentPackageName: 'com.genesis.employee_app',
-                            ),
-                            PolylineLayer(
-                              polylines: [
-                                Polyline(
-                                  points: _routePoints,
-                                  color: Colors.blue,
-                                  strokeWidth: 4.0,
+            child: RefreshIndicator(
+              onRefresh: _onRefresh,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: constraints.maxHeight,
+                      child: _isLoading
+                          ? const Center(child: CircularProgressIndicator())
+                          : _loadError != null
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(24.0),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        _loadError!,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(color: colorScheme.error),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      ElevatedButton.icon(
+                                        onPressed: _isLoading ? null : () => _fetchRoute(),
+                                        icon: const Icon(Icons.refresh),
+                                        label: const Text('Retry'),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
-                            ),
-                            MarkerLayer(markers: _markers),
-                          ],
-                        ),
-                        Positioned(
-                          right: 16,
-                          top: 16,
-                          child: _buildZoomControls(context),
-                        ),
-                      ],
+                              )
+                            : _routePoints.isEmpty
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(24.0),
+                                    child: Text(
+                                      "No route data for ${DateFormat('EEEE, d MMM yyyy').format(_selectedDate)}",
+                                      textAlign: TextAlign.center,
+                                      style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
+                                    ),
+                                  ),
+                                )
+                              : Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    FlutterMap(
+                                      mapController: _mapController,
+                                      options: MapOptions(
+                                        initialCenter: _routePoints.isNotEmpty
+                                            ? _routePoints.last
+                                            : const LatLng(23.8103, 90.4125),
+                                        initialZoom: 13.0,
+                                        onPositionChanged: (camera, hasGesture) {
+                                          if (mounted) {
+                                            setState(() {
+                                              _currentZoom = camera.zoom ?? _currentZoom;
+                                            });
+                                          }
+                                        },
+                                      ),
+                                      children: [
+                                        TileLayer(
+                                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                          userAgentPackageName: 'com.genesis.employee_app',
+                                        ),
+                                        PolylineLayer(
+                                          polylines: [
+                                            Polyline(
+                                              points: _routePoints,
+                                              color: Colors.blue,
+                                              strokeWidth: 4.0,
+                                            ),
+                                          ],
+                                        ),
+                                        MarkerLayer(markers: _markers),
+                                      ],
+                                    ),
+                                    Positioned(
+                                      right: 16,
+                                      top: 16,
+                                      child: _buildZoomControls(context),
+                                    ),
+                                  ],
+                                ),
                     ),
+                  );
+                },
+              ),
+            ),
           ),
           Container(
             padding: const EdgeInsets.all(16.0),

@@ -11,6 +11,7 @@ import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/api_service.dart';
+import '../services/foreground_refresh_service.dart';
 import '../services/push_notification_service.dart';
 import 'attendance_screen.dart';
 import 'route_map_screen.dart';
@@ -112,11 +113,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime _todayDate = DateTime(1970, 1, 1);
   Timer? _timer;
   Timer? _placeRefreshTimer;
+  int _loadTodayDutyTimeGeneration = 0;
+  /// Set when getMyAttendance fails so duty time card can show error + retry.
+  String? _dutyTimeLoadError;
+  /// Set when background service status check fails (e.g. exception).
+  bool _statusCheckError = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ForegroundRefreshService().addListener(_onForegroundRefresh);
     _loadData();
     PushNotificationService().registerFCMToken();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -142,10 +149,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   
   @override
   void dispose() {
+    ForegroundRefreshService().removeListener(_onForegroundRefresh);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _placeRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  void _onForegroundRefresh() {
+    if (!mounted) return;
+    _loadData().then((_) {
+      if (!mounted) return;
+      _loadTodayDutyTime();
+    });
   }
 
   @override
@@ -263,7 +279,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Fetch today's attendance and set _todayBaseSeconds, _todayDate, and open session if any.
   /// Uses start_time/end_time for duration (same as My Attendance) so Home and My Attendance match.
   /// Requests a 3-day window (yesterday–tomorrow) so sessions stored under server date are included (timezone-safe).
+  /// Ignores stale completions when multiple calls overlap (e.g. date change at midnight).
   Future<void> _loadTodayDutyTime() async {
+    final gen = ++_loadTodayDutyTimeGeneration;
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
@@ -272,7 +290,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       startDate: yesterdayStr,
       endDate: tomorrowStr,
     );
-    if (!mounted) return;
+    if (!mounted || gen != _loadTodayDutyTimeGeneration) return;
+    final loadError = result['error'] as String?;
     final byDate = result['by_date'] as List<dynamic>?;
     int baseSeconds = 0;
     DateTime? openSessionStart;
@@ -303,9 +322,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         break;
       }
     }
+    if (gen != _loadTodayDutyTimeGeneration) return;
     setState(() {
       _todayBaseSeconds = baseSeconds;
       _todayDate = DateTime(now.year, now.month, now.day);
+      _dutyTimeLoadError = loadError;
       if (openSessionStart != null) {
         _dutyStartTime = openSessionStart;
       }
@@ -314,11 +335,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _checkServiceStatus() async {
-    final isRunning = await FlutterBackgroundService().isRunning();
-    if (mounted) {
-      setState(() {
-        _isTracking = isRunning;
-      });
+    try {
+      final isRunning = await FlutterBackgroundService().isRunning();
+      if (mounted) {
+        setState(() {
+          _isTracking = isRunning;
+          _statusCheckError = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _statusCheckError = true);
+      }
     }
   }
 
@@ -327,6 +355,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await LocationService.syncOfflineData();
     await _loadData();
     await _loadTodayDutyTime();
+    await _checkServiceStatus();
   }
 
   Future<void> _fetchCurrentPlaceName() async {
@@ -474,7 +503,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       }
       if (mounted && context.mounted) {
-        Navigator.of(context).pop(context);
+        Navigator.of(context).pop();
       }
     } else {
       // Start duty: ensure location permission first
@@ -535,6 +564,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SnackBar(content: Text('Could not start tracking. Check permissions.')),
           );
         } else if (started && mounted) {
+          if (startData == null && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Duty started locally. Will sync when connected.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
           final hasBackground = await _locationService.hasBackgroundLocationPermission();
           if (!hasBackground && mounted && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -550,7 +587,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }
       } finally {
         if (mounted && context.mounted) {
-          Navigator.of(context).pop(context);
+          Navigator.of(context).pop();
         }
       }
     }
@@ -709,9 +746,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: _isTracking ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12),
+                color: _statusCheckError
+                    ? colorScheme.outlineVariant.withValues(alpha: 0.2)
+                    : (_isTracking ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12)),
                 borderRadius: BorderRadius.circular(24),
-                boxShadow: _isTracking
+                boxShadow: _isTracking && !_statusCheckError
                     ? [
                         BoxShadow(
                           color: Colors.green.withValues(alpha: 0.25),
@@ -725,15 +764,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    _isTracking ? Icons.circle : Icons.circle_outlined,
-                    color: _isTracking ? Colors.green : Colors.red,
+                    _statusCheckError ? Icons.help_outline : (_isTracking ? Icons.circle : Icons.circle_outlined),
+                    color: _statusCheckError ? colorScheme.onSurfaceVariant : (_isTracking ? Colors.green : Colors.red),
                     size: 12,
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    _isTracking ? 'Online' : 'Offline',
+                    _statusCheckError ? 'Status unavailable' : (_isTracking ? 'Online' : 'Offline'),
                     style: TextStyle(
-                      color: _isTracking ? Colors.green : Colors.red,
+                      color: _statusCheckError ? colorScheme.onSurfaceVariant : (_isTracking ? Colors.green : Colors.red),
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -930,6 +969,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
+            if (_dutyTimeLoadError != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _dutyTimeLoadError!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.error,
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() => _dutyTimeLoadError = null);
+                  _loadTodayDutyTime();
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+              ),
+            ],
           ],
         ),
       ),
