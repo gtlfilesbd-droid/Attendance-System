@@ -580,6 +580,7 @@ def employee_route(request):
                     'address': loc.get('address', ''),
                     'speed': loc.get('speed'),
                     'accuracy': loc.get('accuracy'),
+                    'battery_level': loc.get('battery_level'),
                 })
         route_data['locations'] = formatted_locations
     
@@ -989,18 +990,45 @@ def route_history_view(request):
     """
     Route playback page
     Template: dashboard/route_history.html
-    Includes date picker + employee selector.
+    Includes date picker + department + employee selector.
     """
-    from employees.models import Employee
+    import json
+    from employees.models import Employee, Department
 
-    # Non-admin users only see themselves
     if getattr(request.user, 'is_staff', False):
-        employees = Employee.objects.filter(is_active=True).order_by('name')
+        departments = list(
+            Department.objects.filter(is_active=True).values_list('name', flat=True).order_by('name')
+        )
+        employees = list(
+            Employee.objects.filter(is_active=True)
+            .select_related('department')
+            .order_by('name')
+            .values('id', 'employee_id', 'name', 'department__name')
+        )
     else:
-        employees = Employee.objects.filter(id=request.user.id)
+        employees_qs = Employee.objects.filter(id=request.user.id).select_related('department')
+        employees = list(
+            employees_qs.values('id', 'employee_id', 'name', 'department__name')
+        )
+        dept_names = set(e.get('department__name') for e in employees if e.get('department__name'))
+        departments = sorted(dept_names) if dept_names else []
+
+    employees_json = json.dumps(
+        [
+            {
+                'id': str(e['id']),
+                'employee_id': e['employee_id'],
+                'name': e['name'],
+                'department': e['department__name'] or '—',
+            }
+            for e in employees
+        ],
+        default=str,
+    )
 
     context = {
-        'employees': employees,
+        'departments': departments,
+        'employees_json': employees_json,
         'today': timezone.localdate(),
     }
     return render(request, 'dashboard/route_history.html', context)

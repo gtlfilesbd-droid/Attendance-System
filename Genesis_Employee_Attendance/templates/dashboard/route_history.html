@@ -38,6 +38,67 @@
         border-left-color: var(--primary);
     }
     
+    .timeline-item .timeline-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 0.35rem;
+        font-size: 0.9rem;
+    }
+    .timeline-item .timeline-row:last-child { margin-bottom: 0; }
+    .timeline-item .timeline-row .timeline-icon {
+        width: 1.25rem;
+        text-align: center;
+        color: #64748b;
+        flex-shrink: 0;
+    }
+    .timeline-location {
+        overflow-x: auto;
+        white-space: nowrap;
+        max-width: 100%;
+        min-width: 0;
+        scrollbar-width: thin;
+        border-radius: 4px;
+        padding: 0.15rem 0;
+    }
+    .timeline-location::-webkit-scrollbar { height: 4px; }
+    
+    .timeline-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.8rem;
+        color: #64748b;
+        margin-bottom: 0.5rem;
+    }
+    .timeline-status.timeline-status-in-row {
+        margin-bottom: 0;
+    }
+    .timeline-status .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--success, #10b981);
+        flex-shrink: 0;
+        animation: timeline-pulse 2s ease-in-out infinite;
+    }
+    .timeline-item.active .timeline-status .status-dot {
+        background: var(--primary, #2563eb);
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.3);
+    }
+    .timeline-status .status-label {
+        font-weight: 600;
+        color: #475569;
+    }
+    .timeline-status .status-sep {
+        color: #cbd5e1;
+        font-weight: 300;
+    }
+    @keyframes timeline-pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+    
     .playback-controls {
         background: white;
         padding: 1rem;
@@ -76,31 +137,35 @@
 </div>
 
 <!-- Filters -->
-<div class="row g-3 mb-4">
-    <div class="col-md-3">
+<div class="row g-3 mb-4 align-items-end">
+    <div class="col-6 col-sm-4 col-md-2">
+        <label class="form-label">Department</label>
+        <select class="form-select" id="departmentSelect">
+            <option value="">All Departments</option>
+            {% for dept in departments %}
+            <option value="{{ dept }}">{{ dept }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-6 col-sm-4 col-md-2">
         <label class="form-label">Employee</label>
         <select class="form-select" id="employeeSelect">
             <option value="">All Employees</option>
-            <!-- Populated via JavaScript -->
         </select>
     </div>
-    
-    <div class="col-md-3">
+    <div class="col-6 col-sm-4 col-md-2">
         <label class="form-label">Date</label>
         <input type="date" class="form-control" id="dateSelect" value="{{ today|date:'Y-m-d' }}">
     </div>
-    
-    <div class="col-md-2">
+    <div class="col-6 col-sm-4 col-md-2">
         <label class="form-label">Start Time</label>
         <input type="time" class="form-control" id="startTime">
     </div>
-    
-    <div class="col-md-2">
+    <div class="col-6 col-sm-4 col-md-2">
         <label class="form-label">End Time</label>
         <input type="time" class="form-control" id="endTime">
     </div>
-    
-    <div class="col-md-2 d-flex align-items-end">
+    <div class="col-6 col-sm-4 col-md-2">
         <button class="btn btn-primary w-100" onclick="loadRoute()">
             <i class="fas fa-search me-2"></i>Load Route
         </button>
@@ -108,7 +173,7 @@
 </div>
 
 <!-- Map Container -->
-<div class="row mb-4">
+<div class="row mb-4" id="routeMapSection">
     <div class="col-12">
         <div class="stat-card p-0">
             <div id="routeMap"></div>
@@ -179,9 +244,42 @@
 {% load static %}
 <script src="{% static 'js/map_tracking.js' %}"></script>
 <script>
+    const ALL_EMPLOYEES = {{ employees_json|safe }};
+    let filteredEmployees = [];
     let mapTracker;
     let routeData = [];
-    
+
+    function loadEmployeesByDepartment() {
+        const department = document.getElementById('departmentSelect').value;
+        const select = document.getElementById('employeeSelect');
+        if (!select) return;
+
+        const employees = Array.isArray(ALL_EMPLOYEES) ? ALL_EMPLOYEES : [];
+        filteredEmployees = department
+            ? employees.filter(emp => emp.department === department)
+            : employees;
+
+        select.innerHTML = '';
+        if (filteredEmployees.length === 0) {
+            const emptyOpt = document.createElement('option');
+            emptyOpt.value = '';
+            emptyOpt.textContent = 'No employees in selected department';
+            emptyOpt.disabled = true;
+            select.appendChild(emptyOpt);
+        } else {
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All Employees';
+            select.appendChild(allOpt);
+            filteredEmployees.forEach(emp => {
+                const option = document.createElement('option');
+                option.value = emp.id;
+                option.textContent = `${emp.name || ''} (${emp.employee_id || ''})`;
+                select.appendChild(option);
+            });
+        }
+    }
+
     // Initialize map
     async function initRouteMap() {
         if (typeof L === 'undefined') {
@@ -189,63 +287,32 @@
             showAlert('Leaflet.js library is not loaded. Please check your internet connection.', 'danger');
             return;
         }
-        
+
         try {
             mapTracker = new MapTracking();
             await mapTracker.initRouteMap('routeMap');
-            
+
             // Set up callbacks
             mapTracker.onProgressUpdate = (current, total) => {
                 updateProgress(current, total);
             };
-            
+
             mapTracker.onLocationChange = (index, location) => {
                 highlightTimelineItem(index);
             };
-            
+
             mapTracker.onPlaybackComplete = () => {
                 const playIcon = document.getElementById('playIcon');
                 const playText = document.getElementById('playText');
                 if (playIcon) playIcon.className = 'fas fa-play';
                 if (playText) playText.textContent = 'Play';
             };
-            
-            // Load employees for dropdown
-            loadEmployees();
+
+            loadEmployeesByDepartment();
+            document.getElementById('departmentSelect').addEventListener('change', loadEmployeesByDepartment);
         } catch (error) {
             console.error('Error initializing route map:', error);
             showAlert('Error initializing map. Please check if Leaflet.js is loaded.', 'danger');
-        }
-    }
-    
-    // Load employees list
-    async function loadEmployees() {
-        try {
-            const response = await fetch('/api/employees/', {
-                method: 'GET',
-                headers: mapTracker ? mapTracker.getAuthHeaders() : getAuthHeaders(),
-                credentials: 'same-origin'
-            });
-            
-            const data = await response.json();
-            const select = document.getElementById('employeeSelect');
-            
-            if (select && data.results) {
-                // Clear existing options except the first one
-                while (select.options.length > 1) {
-                    select.remove(1);
-                }
-                
-                data.results.forEach(emp => {
-                    const option = document.createElement('option');
-                    option.value = emp.id;
-                    option.textContent = `${emp.name} (${emp.employee_id || ''})`;
-                    select.appendChild(option);
-                });
-            }
-        } catch (error) {
-            console.error('Error loading employees:', error);
-            showAlert('Error loading employees list.', 'danger');
         }
     }
     
@@ -315,6 +382,26 @@
         resetPlayback();
     }
     
+    // Format time as "04:14:58 PM" for timeline
+    function formatTimelineTime(timestamp) {
+        if (!timestamp) return '—';
+        const d = new Date(timestamp);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    // Format date as "Wednesday, 25 Feb 2026" for timeline
+    function formatTimelineDate(timestamp) {
+        if (!timestamp) return '—';
+        const d = new Date(timestamp);
+        if (isNaN(d.getTime())) return '—';
+        return d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' });
+    }
+    function escapeHtml(text) {
+        if (text == null) return '';
+        const s = String(text);
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    
     // Update timeline
     function updateTimeline() {
         const timeline = document.getElementById('routeTimeline');
@@ -329,23 +416,51 @@
         let html = '';
         routeData.forEach((loc, index) => {
             const timestamp = loc.timestamp || loc.created_at;
-            const date = timestamp ? new Date(timestamp) : new Date();
-            const formattedTime = mapTracker ? mapTracker.formatTimestamp(timestamp) : date.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const address = loc.address || '';
-            const speed = loc.speed ? (loc.speed * 3.6).toFixed(1) : null;
+            const timeStr = formatTimelineTime(timestamp);
+            const dateStr = formatTimelineDate(timestamp);
+            const relativeTime = mapTracker ? mapTracker.formatTimestamp(timestamp) : (timestamp ? '—' : '—');
+            const address = loc.address ? escapeHtml(loc.address) : '—';
+            const speedVal = loc.speed != null && !isNaN(parseFloat(loc.speed)) ? (parseFloat(loc.speed) * 3.6).toFixed(1) : null;
+            const batteryVal = loc.battery_level != null && !isNaN(parseInt(loc.battery_level, 10)) ? parseInt(loc.battery_level, 10) : null;
             
             html += `
                 <div class="timeline-item" onclick="jumpToLocation(${index})" id="timeline-${index}">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <strong>${formattedTime}</strong>
-                            ${address ? `<div class="text-muted small mt-1">${address.substring(0, 50)}${address.length > 50 ? '...' : ''}</div>` : ''}
-                        </div>
-                        <div class="text-end">
-                            <small class="text-muted">${index + 1}/${routeData.length}</small>
-                            ${speed ? `<div class="small text-muted"><i class="fas fa-tachometer-alt"></i> ${speed} km/h</div>` : ''}
-                        </div>
+                    <div class="mb-2">
+                        <span class="badge bg-secondary">${index + 1}/${routeData.length}</span>
                     </div>
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-clock"></i></span>
+                        <span><strong>${timeStr}</strong></span>
+                    </div>
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-calendar-alt"></i></span>
+                        <span class="text-muted small">${dateStr}</span>
+                    </div>
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-map-marker-alt"></i></span>
+                        <div class="timeline-location text-muted small" title="${address}">${address}</div>
+                    </div>
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-signal"></i></span>
+                        <span class="timeline-status timeline-status-in-row">
+                            <span class="status-dot"></span>
+                            <span class="status-label">Active</span>
+                            <span class="status-sep">•</span>
+                            <span>${relativeTime}</span>
+                        </span>
+                    </div>
+                    ${speedVal != null ? `
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-tachometer-alt"></i></span>
+                        <span class="text-muted small">${speedVal} km/h</span>
+                    </div>
+                    ` : ''}
+                    ${batteryVal != null ? `
+                    <div class="timeline-row">
+                        <span class="timeline-icon"><i class="fas fa-battery-half"></i></span>
+                        <span class="text-muted small">${batteryVal}%</span>
+                    </div>
+                    ` : ''}
                 </div>
             `;
         });
@@ -381,6 +496,9 @@
         if (mapTracker.isPlaying) {
             if (playIcon) playIcon.className = 'fas fa-pause';
             if (playText) playText.textContent = 'Pause';
+            const mapSection = document.getElementById('routeMapSection');
+            if (mapSection) mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            if (mapTracker.map) mapTracker.map.setZoom(19);
         } else {
             if (playIcon) playIcon.className = 'fas fa-play';
             if (playText) playText.textContent = 'Play';
@@ -389,6 +507,9 @@
     
     // Jump to specific location
     function jumpToLocation(index) {
+        const mapSection = document.getElementById('routeMapSection');
+        if (mapSection) mapSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (mapTracker && mapTracker.map) mapTracker.map.setZoom(19);
         if (mapTracker) {
             mapTracker.jumpToLocation(index);
         }
@@ -433,17 +554,11 @@
         if (progressText) progressText.textContent = `${current}/${total}`;
     }
     
-    // Highlight timeline item
+    // Highlight timeline item (no scroll - keep focus on Route Map during playback)
     function highlightTimelineItem(index) {
         document.querySelectorAll('.timeline-item').forEach((item, i) => {
             item.classList.toggle('active', i === index);
         });
-        
-        // Scroll timeline item into view
-        const timelineItem = document.getElementById(`timeline-${index}`);
-        if (timelineItem) {
-            timelineItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
     }
     
     // Get CSRF token for Django session auth

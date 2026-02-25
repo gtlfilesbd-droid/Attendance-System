@@ -226,6 +226,7 @@ class RouteHistorySerializer(serializers.Serializer):
                     'timestamp': loc.timestamp,
                     'accuracy': loc.accuracy,
                     'battery_level': loc.battery_level,
+                    'speed': getattr(loc, 'speed', None),
                     'address': loc.address,
                 }
                 for loc in locations
