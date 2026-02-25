@@ -3,6 +3,14 @@ import 'package:flutter/foundation.dart';
 import '../config/app_config.dart';
 import 'auth_service.dart';
 
+/// Route API response: locations list and optional distance in km from backend.
+class RouteResponse {
+  final List<dynamic> locations;
+  final double? distanceKm;
+
+  const RouteResponse({required this.locations, this.distanceKm});
+}
+
 class ApiService {
   // Singleton pattern
   static final ApiService _instance = ApiService._internal();
@@ -264,10 +272,14 @@ class ApiService {
     }
   }
 
+  /// Response from route API: locations and optional distance when backend provides it.
+  static RouteResponse emptyRoute() =>
+      const RouteResponse(locations: <dynamic>[], distanceKm: null);
+
   /// Get my route for a given date (and optional time range).
   /// GET /tracking/employee-route/?employee_id=uuid&date=YYYY-MM-DD&start_time=&end_time=
-  /// Backend returns { "data": { "locations": [...] } }; each location may have latitude/longitude or location.lat/lng.
-  Future<List<dynamic>> getMyRoute({
+  /// Backend returns { "data": { "locations": [...], "distance": number? } }; use distance when available.
+  Future<RouteResponse> getMyRouteWithMeta({
     required String employeeId,
     String? date,
     String? startTime,
@@ -284,20 +296,40 @@ class ApiService {
       );
       if (response.statusCode == 200 && response.data['success'] == true) {
         final data = response.data['data'];
-        if (data == null) return [];
-        final locations = data['locations'];
-        if (locations == null) return [];
-        if (locations is List) return List<dynamic>.from(locations);
-        if (locations is Map && locations['features'] is List) {
-          return List<dynamic>.from(locations['features'] as List);
+        if (data == null) return ApiService.emptyRoute();
+        final locs = data['locations'];
+        List<dynamic> locations = [];
+        if (locs is List) {
+          locations = List<dynamic>.from(locs);
+        } else if (locs is Map && locs['features'] is List) {
+          locations = List<dynamic>.from(locs['features'] as List);
         }
-        return [];
+        double? distanceKm;
+        final dist = data['distance'] ?? data['distance_km'];
+        if (dist != null && dist is num) distanceKm = dist.toDouble();
+        return RouteResponse(locations: locations, distanceKm: distanceKm);
       }
-      return [];
+      return ApiService.emptyRoute();
     } catch (e) {
-      print('API: getMyRoute error: $e');
+      print('API: getMyRouteWithMeta error: $e');
       rethrow;
     }
+  }
+
+  /// Get my route (locations only). Prefer [getMyRouteWithMeta] when distance from backend is needed.
+  Future<List<dynamic>> getMyRoute({
+    required String employeeId,
+    String? date,
+    String? startTime,
+    String? endTime,
+  }) async {
+    final res = await getMyRouteWithMeta(
+      employeeId: employeeId,
+      date: date,
+      startTime: startTime,
+      endTime: endTime,
+    );
+    return res.locations;
   }
 
   /// Resolve lat/lon to the same display address as the dashboard marker popup.

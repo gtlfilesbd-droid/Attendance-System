@@ -1,7 +1,20 @@
+// Route screen: orchestration only — state, fetch, filters, and child widgets
+// (filters bar, map area, stats bar, playback bar, error/empty views). See plan §9.
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
+import 'route/route_animation_controller.dart';
+import 'route/route_playback_controller.dart';
+import 'route/widgets/route_animated_marker.dart';
+import 'route/widgets/route_empty_view.dart';
+import 'route/widgets/route_error_view.dart';
+import 'route/widgets/route_map_area.dart';
+import 'route/widgets/route_playback_bar.dart';
+import 'route/widgets/route_stats_bar.dart';
+import 'route/widgets/route_timeline_list.dart';
+import '../models/route_point.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/foreground_refresh_service.dart';
@@ -37,6 +50,9 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   bool _isRefreshing = false;
   int _fetchRouteRequestId = 0;
 
+  late final RouteAnimationController _animationController;
+  late final RoutePlaybackController _playbackController;
+
   void _zoomIn() {
     final camera = _mapController.camera;
     final newZoom = (camera.zoom + 1).clamp(_minZoom, _maxZoom);
@@ -52,18 +68,23 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   @override
   void initState() {
     super.initState();
+    _animationController = RouteAnimationController();
+    _playbackController = RoutePlaybackController(_animationController);
     ForegroundRefreshService().addListener(_onForegroundRefresh);
     _fetchRoute();
   }
 
   @override
   void dispose() {
+    _playbackController.pause();
     ForegroundRefreshService().removeListener(_onForegroundRefresh);
     super.dispose();
   }
 
   void _onForegroundRefresh() {
     if (!mounted) return;
+    _playbackController.pause();
+    _playbackController.reset();
     _fetchRoute();
   }
 
@@ -71,6 +92,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     if (_isRefreshing) return;
     setState(() => _isRefreshing = true);
     try {
+      _playbackController.pause();
+      _playbackController.reset();
       ApiService().initialize();
       await _fetchRoute();
     } finally {
@@ -105,14 +128,17 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
     final startTimeStr = _timeOfDayToHhMmSs(_startTime);
     final endTimeStr = _timeOfDayToHhMmSs(_endTime);
-    List<dynamic> locations;
+    late final List<dynamic> locations;
+    late final double distanceFromApi;
     try {
-      locations = await _apiService.getMyRoute(
+      final response = await _apiService.getMyRouteWithMeta(
         employeeId: employeeId,
         date: dateStr,
         startTime: startTimeStr,
         endTime: endTimeStr,
       );
+      locations = response.locations;
+      distanceFromApi = response.distanceKm ?? -1.0; // Use backend distance when available
     } catch (e) {
       if (mounted && requestId == _fetchRouteRequestId) {
         setState(() {
@@ -128,11 +154,14 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     }
     if (!mounted || requestId != _fetchRouteRequestId) return;
 
-    // Process route: filter, dedupe, smooth; get points and distance for display
-    final processed = processRouteForDisplay(locations);
+    // Process route with time for playback and stats
+    final processed = processRouteForDisplayWithTime(locations);
     final points = processed.points;
+    final pointsWithTime = processed.pointsWithTime;
     double distance = processed.distanceKm;
-    if (points.length >= 2 && distance == 0) {
+    if (distanceFromApi >= 0) {
+      distance = distanceFromApi; // Prefer backend distance when available
+    } else if (points.length >= 2 && distance == 0) {
       const distanceCalculator = Distance();
       distance = 0.0;
       for (int i = 0; i < points.length - 1; i++) {
@@ -140,18 +169,41 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       }
     }
 
-    // Build markers: only start and end
+    // Build markers: start and end with timestamps from pointsWithTime
+    List<Marker> markers = _buildStartEndMarkers(points, pointsWithTime);
+
+    if (mounted && requestId == _fetchRouteRequestId) {
+      setState(() {
+        _routePoints = points;
+        _markers = markers;
+        _totalDistanceKm = distance;
+        _rawPointsCount = locations.length;
+        _isLoading = false;
+        if (points.isNotEmpty) {
+          _currentZoom = 14.0;
+        }
+      });
+      _playbackController.setRoute(pointsWithTime);
+      if (points.isNotEmpty) {
+        _mapController.move(points.last, 14.0);
+      }
+    }
+  }
+
+  List<Marker> _buildStartEndMarkers(List<LatLng> points, List<RoutePointWithTime> pointsWithTime) {
     List<Marker> markers = [];
     if (points.length >= 2) {
-      final firstTimestamp = locations.isNotEmpty ? locations.first['timestamp']?.toString() : null;
-      final lastTimestamp = locations.isNotEmpty ? locations.last['timestamp']?.toString() : null;
+      final startTime = pointsWithTime.isNotEmpty ? pointsWithTime.first.timestamp : null;
+      final endTime = pointsWithTime.length > 1 ? pointsWithTime.last.timestamp : null;
+      final startLabel = startTime != null ? 'Start ${DateFormat.Hm().format(startTime)}' : 'Start';
+      final endLabel = endTime != null ? 'End ${DateFormat.Hm().format(endTime)}' : 'End';
       markers.add(
         Marker(
           point: points.first,
           width: 40,
           height: 40,
           child: Tooltip(
-            message: firstTimestamp != null ? 'Start ${_formatTimeIso(firstTimestamp)}' : 'Start',
+            message: startLabel,
             child: const Icon(Icons.trip_origin, color: Colors.green, size: 32),
           ),
         ),
@@ -162,7 +214,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
           width: 40,
           height: 40,
           child: Tooltip(
-            message: lastTimestamp != null ? 'End ${_formatTimeIso(lastTimestamp)}' : 'End',
+            message: endLabel,
             child: const Icon(Icons.location_on, color: Colors.red, size: 32),
           ),
         ),
@@ -180,23 +232,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
         ),
       );
     }
-
-    if (mounted && requestId == _fetchRouteRequestId) {
-      setState(() {
-        _routePoints = points;
-        _markers = markers;
-        _totalDistanceKm = distance;
-        _rawPointsCount = locations.length;
-        _isLoading = false;
-        if (points.isNotEmpty) {
-          _currentZoom = 14.0;
-        }
-      });
-
-      if (points.isNotEmpty) {
-        _mapController.move(points.last, 14.0);
-      }
-    }
+    return markers;
   }
   
   /// Format TimeOfDay as HH:mm:ss for API.
@@ -223,17 +259,6 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     if (picked != null && mounted) {
       setState(() => _endTime = picked);
       _fetchRoute();
-    }
-  }
-
-  /// Format ISO timestamp to time string (no BuildContext, safe after async).
-  String _formatTimeIso(String isoString) {
-    try {
-      final dt = DateTime.parse(isoString);
-      final local = dt.isUtc ? dt.toLocal() : dt;
-      return DateFormat.Hm().format(local);
-    } catch (e) {
-      return '';
     }
   }
 
@@ -304,6 +329,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
       ),
       body: Column(
         children: [
+          // Filters bar (plan §9: date, from/to time)
           Material(
             elevation: 1,
             child: Padding(
@@ -436,79 +462,48 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
                       child: _isLoading
                           ? const Center(child: CircularProgressIndicator())
                           : _loadError != null
-                            ? Center(
-                                child: Padding(
-                                  padding: const EdgeInsets.all(24.0),
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Text(
-                                        _loadError!,
-                                        textAlign: TextAlign.center,
-                                        style: TextStyle(color: colorScheme.error),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      ElevatedButton.icon(
-                                        onPressed: _isLoading ? null : () => _fetchRoute(),
-                                        icon: const Icon(Icons.refresh),
-                                        label: const Text('Retry'),
-                                      ),
-                                    ],
-                                  ),
-                                ),
+                            ? RouteErrorView(
+                                message: _loadError!,
+                                onRetry: _fetchRoute,
+                                isLoading: _isLoading,
                               )
                             : _routePoints.isEmpty
-                              ? Center(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(24.0),
-                                    child: Text(
-                                      "No route data for ${DateFormat('EEEE, d MMM yyyy').format(_selectedDate)}",
-                                      textAlign: TextAlign.center,
-                                      style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onSurfaceVariant),
-                                    ),
-                                  ),
+                              ? RouteEmptyView(
+                                  dateLabel: DateFormat('EEEE, d MMM yyyy').format(_selectedDate),
                                 )
-                              : Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    FlutterMap(
+                              : ListenableBuilder(
+                                  listenable: _animationController,
+                                  builder: (context, _) {
+                                    // Plan §5: optionally center map on current point when following playback
+                                    if (_playbackController.followPlayback && _playbackController.isPlaying) {
+                                      final pos = _animationController.currentPosition;
+                                      if (pos != null) {
+                                        SchedulerBinding.instance.addPostFrameCallback((_) {
+                                          if (mounted) _mapController.move(pos, _mapController.camera.zoom);
+                                        });
+                                      }
+                                    }
+                                    return RouteMapArea(
+                                      polylinePoints: _routePoints,
+                                      staticMarkers: _markers,
+                                      animatedMarker: buildRouteAnimatedMarker(_animationController),
                                       mapController: _mapController,
-                                      options: MapOptions(
-                                        initialCenter: _routePoints.isNotEmpty
-                                            ? _routePoints.last
-                                            : const LatLng(23.8103, 90.4125),
-                                        initialZoom: 13.0,
-                                        onPositionChanged: (camera, hasGesture) {
-                                          if (mounted) {
-                                            setState(() {
-                                              _currentZoom = camera.zoom ?? _currentZoom;
-                                            });
-                                          }
-                                        },
-                                      ),
-                                      children: [
-                                        TileLayer(
-                                          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                          userAgentPackageName: 'com.genesis.employee_app',
-                                        ),
-                                        PolylineLayer(
-                                          polylines: [
-                                            Polyline(
-                                              points: _routePoints,
-                                              color: Colors.blue,
-                                              strokeWidth: 4.0,
-                                            ),
-                                          ],
-                                        ),
-                                        MarkerLayer(markers: _markers),
-                                      ],
-                                    ),
-                                    Positioned(
-                                      right: 16,
-                                      top: 16,
-                                      child: _buildZoomControls(context),
-                                    ),
-                                  ],
+                                      initialCenter: _routePoints.isNotEmpty
+                                          ? _routePoints.last
+                                          : const LatLng(23.8103, 90.4125),
+                                      initialZoom: 13.0,
+                                      minZoom: _minZoom,
+                                      maxZoom: _maxZoom,
+                                      onPositionChanged: (camera, hasGesture) {
+                                        if (mounted) {
+                                          setState(() {
+                                            _currentZoom = camera.zoom;
+                                          });
+                                        }
+                                      },
+                                      zoomOverlay: _buildZoomControls(context),
+                                    );
+                                  },
                                 ),
                     ),
                   );
@@ -516,52 +511,36 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            color: Colors.white,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          RoutePlaybackBar(playbackController: _playbackController),
+          if (_routePoints.isNotEmpty)
+            ExpansionTile(
+              title: Text(
+                'Route timeline',
+                style: theme.textTheme.titleSmall,
+              ),
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Distance Traveled',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      '${_totalDistanceKm.toStringAsFixed(2)} km',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text(
-                      'Points Logged',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
-                    Text(
-                      '$_rawPointsCount',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+                RouteTimelineList(
+                  playbackController: _playbackController,
+                  onSeekToPoint: (index) {
+                    if (index >= 0 && index < _routePoints.length) {
+                      final zoom = _mapController.camera.zoom;
+                      _mapController.move(_routePoints[index], zoom);
+                    }
+                  },
                 ),
               ],
             ),
+          ListenableBuilder(
+            listenable: _playbackController,
+            builder: (context, _) {
+              return RouteStatsBar(
+                distanceKm: _totalDistanceKm,
+                pointsLogged: _rawPointsCount,
+                speedKmh: _playbackController.currentSpeedKmh,
+                maxSpeedKmh: _playbackController.maxSpeedKmh,
+                avgSpeedKmh: _playbackController.averageSpeedKmh,
+              );
+            },
           ),
         ],
       ),

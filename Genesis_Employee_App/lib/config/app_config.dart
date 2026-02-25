@@ -27,8 +27,11 @@ class AppConfig {
   /// Relaxed to 200m for moving scenarios (vehicle/fast walking) where GPS accuracy often degrades.
   static const double maxAccuracyToSendMeters = 200.0;
   /// Send-side filter: do not send if moved less than this since last send (meters).
+  /// Enterprise tuning: use 10–20 for walking, ~25 for running, 30–50 for driving.
+  /// Optional: detect movement type from [Position.speed] and adapt this threshold per profile.
   static const double minMovementToSendMeters = 10.0;
-  /// Send-side filter: when standing still, still send at least every N seconds.
+  /// Send-side filter: when standing still, still send at least every N seconds (e.g. 300 = 5 min).
+  /// Ensures last known position is sent after a timeout even if the user has not moved.
   static const int maxIntervalWhenStillSeconds = 300;
 
   // Storage Keys

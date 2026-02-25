@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
@@ -154,13 +153,15 @@ class LocationService {
         return;
       }
 
-      // Send-side filter: skip bad GPS
+      // Send-side filter: skip bad GPS (adaptive thresholds in AppConfig)
       if (position.accuracy > AppConfig.maxAccuracyToSendMeters) {
         print('FLUTTER_BG_SERVICE: Skipping send (accuracy ${position.accuracy}m > ${AppConfig.maxAccuracyToSendMeters}m)');
         return;
       }
 
-      // Send-side filter: skip if standing still (no filter on first send)
+      // Send-side filter: skip if standing still (no filter on first send).
+      // Optional: use position.speed to classify walking/running/driving and apply
+      // different minMovementToSendMeters (see AppConfig docs).
       final prefs = await SharedPreferences.getInstance();
       final lastLat = prefs.getDouble(_keyLastSentLat);
       final lastLng = prefs.getDouble(_keyLastSentLng);
