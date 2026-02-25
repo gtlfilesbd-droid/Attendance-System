@@ -118,8 +118,8 @@ class DutySession(models.Model):
     end_longitude = models.FloatField(null=True, blank=True)
     end_address = models.TextField(null=True, blank=True)
     total_hours = models.DecimalField(
-        max_digits=5,
-        decimal_places=2,
+        max_digits=7,
+        decimal_places=4,
         default=0,
         help_text='Hours for this session (set when end_time is set)',
     )

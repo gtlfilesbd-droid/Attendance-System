@@ -97,7 +97,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final AuthService _authService = AuthService();
   final LocationService _locationService = LocationService();
 
@@ -116,17 +116,16 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadData();
     PushNotificationService().registerFCMToken();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         _startTimer();
-        _loadTodayDutyTime();
+        // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
+        await _locationService.stopTracking();
+        if (mounted) await _loadTodayDutyTime();
       }
-    });
-    // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
-    _locationService.stopTracking().then((_) {
-      if (mounted) _checkServiceStatus();
     });
     _fetchCurrentPlaceName().then((_) {
       if (mounted) {
@@ -143,9 +142,33 @@ class _HomeScreenState extends State<HomeScreen> {
   
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _placeRefreshTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _onAppResumed();
+    }
+  }
+
+  Future<void> _onAppResumed() async {
+    await _checkServiceStatus();
+    if (!mounted) return;
+    // If we have open session but service was killed (e.g. by Android), restart tracking
+    if (!_isTracking && _dutyStartTime != null) {
+      await _locationService.startTracking();
+      await _checkServiceStatus();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tracking resumed')),
+        );
+      }
+    }
   }
 
   void _startTimer() {
@@ -211,8 +234,12 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  /// Session duration in seconds from start_time/end_time (ISO); matches My Attendance logic.
+  /// Session duration in seconds. Prefers duration_seconds (exact); else from timestamps (rounded); else total_hours.
   static int _sessionDurationSeconds(Map<String, dynamic> sess) {
+    final dur = sess['duration_seconds'];
+    if (dur is int) return dur;
+    if (dur is num) return dur.round();
+
     final startStr = sess['start_time'] as String?;
     final endStr = sess['end_time'] as String?;
     if (startStr != null &&
@@ -224,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final end = DateTime.parse(endStr);
         final startLocal = start.isUtc ? start.toLocal() : start;
         final endLocal = end.isUtc ? end.toLocal() : end;
-        return endLocal.difference(startLocal).inSeconds;
+        return ((endLocal.millisecondsSinceEpoch - startLocal.millisecondsSinceEpoch) / 1000).round();
       } catch (_) {}
     }
     final hours = (sess['total_hours'] is num)
@@ -235,12 +262,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Fetch today's attendance and set _todayBaseSeconds, _todayDate, and open session if any.
   /// Uses start_time/end_time for duration (same as My Attendance) so Home and My Attendance match.
+  /// Requests a 3-day window (yesterday–tomorrow) so sessions stored under server date are included (timezone-safe).
   Future<void> _loadTodayDutyTime() async {
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+    final tomorrowStr = DateFormat('yyyy-MM-dd').format(now.add(const Duration(days: 1)));
     final result = await ApiService().getMyAttendance(
-      startDate: todayStr,
-      endDate: todayStr,
+      startDate: yesterdayStr,
+      endDate: tomorrowStr,
     );
     if (!mounted) return;
     final byDate = result['by_date'] as List<dynamic>?;
@@ -278,9 +308,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _todayDate = DateTime(now.year, now.month, now.day);
       if (openSessionStart != null) {
         _dutyStartTime = openSessionStart;
-        _isTracking = true;
       }
     });
+    await _checkServiceStatus();
   }
 
   Future<void> _checkServiceStatus() async {
@@ -297,6 +327,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
+      // Prefer backend resolve-address (same format as dashboard marker popup)
+      final resolved = await ApiService().resolveAddress(
+        position.latitude,
+        position.longitude,
+      );
+      if (resolved != null && resolved.isNotEmpty && mounted) {
+        setState(() {
+          _currentPlaceName = resolved;
+        });
+        return;
+      }
       final nominatimName = await _nominatimReverseGeocode(
         position.latitude,
         position.longitude,
@@ -374,22 +415,35 @@ class _HomeScreenState extends State<HomeScreen> {
     final isRunning = await service.isRunning();
 
     if (isRunning) {
-      // End duty: show loading, then get position, send to backend, stop tracking
+      // End duty: show loading, get position, send to backend; only stop tracking if backend confirms success
       if (mounted && context.mounted) {
         _showDutyLoadingDialog(context, 'Ending duty...');
       }
+      bool success = false;
+      bool hadException = false;
       try {
-        try {
-          final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
+        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+        success = await ApiService().endDuty(
+          latitude: position.latitude,
+          longitude: position.longitude,
+          address: address,
+        );
+      } catch (e) {
+        success = false;
+        hadException = true;
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not end duty. Check connection and try again.'),
+              backgroundColor: Colors.red,
+            ),
           );
-          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-          await ApiService().endDuty(
-            latitude: position.latitude,
-            longitude: position.longitude,
-            address: address,
-          );
-        } catch (_) {}
+        }
+      }
+      if (success) {
         await _locationService.stopTracking();
         await LocationService.clearLastSentLocation();
         if (mounted) {
@@ -404,10 +458,16 @@ class _HomeScreenState extends State<HomeScreen> {
             });
           }
         }
-      } finally {
-        if (mounted && context.mounted) {
-          Navigator.of(context).pop(context);
-        }
+      } else if (!hadException && mounted && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to end duty. Please try again.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      if (mounted && context.mounted) {
+        Navigator.of(context).pop(context);
       }
     } else {
       // Start duty: ensure location permission first
@@ -433,10 +493,12 @@ class _HomeScreenState extends State<HomeScreen> {
             desiredAccuracy: LocationAccuracy.high,
           );
           final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+          final localDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
           startData = await ApiService().startDuty(
             latitude: position.latitude,
             longitude: position.longitude,
             address: address,
+            date: localDateStr,
           );
         } catch (_) {}
         await _locationService.startTracking();

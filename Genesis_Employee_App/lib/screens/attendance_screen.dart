@@ -139,8 +139,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return dateStr == today;
   }
 
-  /// Compute session duration in seconds from start_time and end_time (ISO); fallback to total_hours if parse fails
+  /// Compute session duration in seconds. Prefers duration_seconds; else from timestamps (rounded); else total_hours.
   int _sessionDurationSeconds(Map<String, dynamic> s) {
+    final dur = s['duration_seconds'];
+    if (dur is int) return dur;
+    if (dur is num) return dur.round();
+
     final startStr = s['start_time'] as String?;
     final endStr = s['end_time'] as String?;
     if (startStr != null && startStr.isNotEmpty && endStr != null && endStr.isNotEmpty) {
@@ -149,7 +153,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         final end = DateTime.parse(endStr);
         final startLocal = start.isUtc ? start.toLocal() : start;
         final endLocal = end.isUtc ? end.toLocal() : end;
-        return endLocal.difference(startLocal).inSeconds;
+        return ((endLocal.millisecondsSinceEpoch - startLocal.millisecondsSinceEpoch) / 1000).round();
       } catch (_) {}
     }
     final hours = (s['total_hours'] is num) ? (s['total_hours'] as num).toDouble() : 0.0;

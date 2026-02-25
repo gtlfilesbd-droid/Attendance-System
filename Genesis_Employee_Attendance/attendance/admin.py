@@ -2,7 +2,12 @@ from django.contrib import admin
 from django.utils import timezone
 from config.admin_export import AdminExportMixin
 from .models import Attendance, DutySession
-from .admin_filters import format_time_12h, format_total_hours_hhmmss
+from .admin_filters import (
+    format_time_12h,
+    format_total_hours_hhmmss,
+    format_duration_from_timestamps,
+    format_attendance_total_hours_from_sessions,
+)
 
 
 @admin.register(Attendance)
@@ -62,7 +67,8 @@ class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
     formatted_check_out_time.admin_order_field = 'check_out_time'
 
     def formatted_total_hours(self, obj):
-        return format_total_hours_hhmmss(obj.total_hours)
+        # Use session timestamps so Admin matches reports/app (same source of truth)
+        return format_attendance_total_hours_from_sessions(obj)
     formatted_total_hours.short_description = 'Total hours'
     formatted_total_hours.admin_order_field = 'total_hours'
 
@@ -128,7 +134,8 @@ class DutySessionAdmin(AdminExportMixin, admin.ModelAdmin):
     formatted_end_time.admin_order_field = 'end_time'
 
     def formatted_total_hours(self, obj):
-        return format_total_hours_hhmmss(obj.total_hours)
+        # Use start_time/end_time so Admin matches App, dashboard, reports (same source of truth)
+        return format_duration_from_timestamps(obj.start_time, obj.end_time)
     formatted_total_hours.short_description = 'Total hours'
     formatted_total_hours.admin_order_field = 'total_hours'
 

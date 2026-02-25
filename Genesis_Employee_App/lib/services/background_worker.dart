@@ -132,38 +132,65 @@ class BackgroundWorker {
       });
     }
 
+    // Cached position from stream; used every 60s for send
+    Position? cachedPosition;
+    StreamSubscription<Position>? positionSubscription;
+    Timer? sendTimer;
+
     service.on('stopService').listen((event) {
+      positionSubscription?.cancel();
+      sendTimer?.cancel();
       service.stopSelf();
     });
 
-    // Tracking Loop - every N seconds while duty is active (Start duty / End duty)
-    Timer.periodic(const Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty), (timer) async {
-      if (service is AndroidServiceInstance) {
-        if (await service.isForegroundService()) {
-          service.setForegroundNotificationInfo(
-            title: "Genesis Tracking",
-            content: "Attendance tracking active. Last update: ${DateTime.now().hour}:${DateTime.now().minute}",
-          );
-        }
-      }
-
-      try {
-        final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.medium);
-        await LocationService.sendLocationToBackend(position, battery);
-        await LocationService.syncOfflineData();
-      } catch (e) {
-        print('BackgroundWorker: Error getting location $e');
-      }
+    // Start position stream for live updates when moving (like Google Maps)
+    positionSubscription = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 0,
+      ),
+    ).listen((Position position) {
+      cachedPosition = position;
+    }, onError: (e) {
+      print('BackgroundWorker: Position stream error $e');
     });
 
-    // Initial check
+    // Timer every N seconds: send cached position or fallback to getCurrentPosition
+    sendTimer = Timer.periodic(
+      const Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty),
+      (timer) async {
+        if (service is AndroidServiceInstance) {
+          if (await service.isForegroundService()) {
+            service.setForegroundNotificationInfo(
+              title: "Genesis Tracking",
+              content:
+                  "Attendance tracking active. Last update: ${DateTime.now().hour}:${DateTime.now().minute}",
+            );
+          }
+        }
+
+        try {
+          Position? position = cachedPosition;
+          position ??= await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          await LocationService.sendLocationToBackend(position, battery);
+          await LocationService.syncOfflineData();
+        } catch (e) {
+          print('BackgroundWorker: Error getting location $e');
+        }
+      },
+    );
+
+    // Initial send: stream may take a moment; use getCurrentPosition for immediate first point
     try {
-        final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.medium);
-        await LocationService.sendLocationToBackend(position, battery);
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      cachedPosition = position;
+      await LocationService.sendLocationToBackend(position, battery);
     } catch (e) {
-        print("BackgroundWorker: Initial location error $e");
+      print("BackgroundWorker: Initial location error $e");
     }
   }
 }

@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     log_location, live_locations, latest_location, employee_route, my_route_today,
-    LocationLogViewSet
+    resolve_address, LocationLogViewSet
 )
 
 router = DefaultRouter()
@@ -13,6 +13,7 @@ urlpatterns = [
     path('log-location/', log_location, name='log-location'),
     path('live-locations/', live_locations, name='live-locations'),
     path('latest-location/', latest_location, name='latest-location'),
+    path('resolve-address/', resolve_address, name='resolve-address'),
     path('employee-route/', employee_route, name='employee-route'),
     path('my-route-today/', my_route_today, name='my-route-today'),
     

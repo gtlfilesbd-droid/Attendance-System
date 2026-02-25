@@ -297,6 +297,29 @@ class ApiService {
     }
   }
 
+  /// Resolve lat/lon to the same display address as the dashboard marker popup.
+  /// GET /tracking/resolve-address/?lat=&lon=
+  Future<String?> resolveAddress(double latitude, double longitude) async {
+    try {
+      final response = await _dio.get(
+        '/tracking/resolve-address/',
+        queryParameters: {'lat': latitude, 'lon': longitude},
+      );
+      if (response.statusCode == 200 && response.data is Map<String, dynamic>) {
+        final data = response.data as Map<String, dynamic>;
+        if (data['success'] == true && data['address'] != null) {
+          final addr = data['address'].toString().trim();
+          return addr.isEmpty ? null : addr;
+        }
+      }
+      return null;
+    } on DioException catch (_) {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Start Duty - record start time and location.
   /// Returns response data (start_time, session_id, date) on success, null on failure.
   /// POST /attendance/start-duty/
@@ -304,6 +327,7 @@ class ApiService {
     required double latitude,
     required double longitude,
     String? address,
+    String? date,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -311,6 +335,7 @@ class ApiService {
         'longitude': longitude,
       };
       if (address != null && address.isNotEmpty) payload['address'] = address;
+      if (date != null && date.isNotEmpty) payload['date'] = date;
       final response = await _dio.post(
         AppConfig.startDutyEndpoint,
         data: payload,

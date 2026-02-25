@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time as time_module
 import urllib.request
 import urllib.parse
 from rest_framework import viewsets, status
@@ -11,6 +12,7 @@ from rest_framework.pagination import PageNumberPagination
 from django.utils import timezone
 from django.db.models import Max, Sum
 from datetime import datetime, timedelta, time
+from attendance.utils import calculate_duration_seconds
 from .models import LocationLog
 from .serializers import (
     LocationLogSerializer, LocationCreateSerializer, RouteHistorySerializer
@@ -56,7 +58,8 @@ def _seconds_to_hhmmss(total_seconds):
 def _reverse_geocode(lat, lon):
     """
     Reverse geocode lat/lon to a place name using OpenStreetMap Nominatim.
-    Returns a string (display_name) or None on failure. Result is truncated to 500 chars for DB.
+    Uses zoom=18 for building-level detail and addressdetails for accurate parts.
+    Returns a string (address or display_name) or None on failure. Truncated to 500 chars for DB.
     """
     if lat is None or lon is None:
         return None
@@ -64,11 +67,25 @@ def _reverse_geocode(lat, lon):
         url = 'https://nominatim.openstreetmap.org/reverse?' + urllib.parse.urlencode({
             'lat': lat,
             'lon': lon,
-            'format': 'json',
+            'format': 'jsonv2',
+            'addressdetails': 1,
+            'zoom': 18,
         })
         req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
+            addr = data.get('address')
+            if isinstance(addr, dict):
+                parts = []
+                for key in (
+                    'house_number', 'road', 'footway', 'pedestrian', 'quarter', 'suburb', 'neighbourhood',
+                    'village', 'town', 'city_district', 'city', 'county', 'state', 'postcode', 'country'
+                ):
+                    val = addr.get(key)
+                    if val and isinstance(val, str) and val.strip() and val.strip() not in parts:
+                        parts.append(val.strip())
+                if parts:
+                    return ', '.join(parts)[:500]
             name = data.get('display_name')
             if name and isinstance(name, str):
                 return name.strip()[:500]
@@ -77,10 +94,84 @@ def _reverse_geocode(lat, lon):
     return None
 
 
+def _reverse_geocode_photon(lat, lon):
+    """
+    Fallback: reverse geocode lat/lon using Photon (Komoot). Free, no API key.
+    Returns a comma-separated address string or None on failure. Truncated to 500 chars.
+    """
+    if lat is None or lon is None:
+        return None
+    try:
+        url = 'https://photon.komoot.io/reverse?' + urllib.parse.urlencode({
+            'lon': lon,
+            'lat': lat,
+        })
+        req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        features = data.get('features') if isinstance(data, dict) else None
+        if not features or not isinstance(features, list):
+            return None
+        props = features[0].get('properties') if features and isinstance(features[0], dict) else None
+        if not props or not isinstance(props, dict):
+            return None
+        parts = []
+        for key in (
+            'housenumber', 'street', 'name', 'district', 'suburb', 'locality',
+            'city', 'county', 'state', 'postcode', 'country'
+        ):
+            val = props.get(key)
+            if val and isinstance(val, str) and val.strip():
+                v = val.strip()
+                if v not in parts:
+                    parts.append(v)
+        if not parts:
+            return None
+        result = ', '.join(parts).strip()
+        return result[:500] if result else None
+    except Exception as e:
+        logger.debug('reverse_geocode_photon failed: %s', e)
+    return None
+
+
+def _is_coordinates_only(s):
+    """True if s looks like "23.12345, 90.12345" (two numbers only)."""
+    if not s or not isinstance(s, str):
+        return False
+    parts = [p.strip() for p in s.split(',')]
+    if len(parts) != 2:
+        return False
+    try:
+        float(parts[0])
+        float(parts[1])
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def get_display_address(lat, lon):
+    """
+    Return the same display address string used in the live-tracking marker popup.
+    Uses Nominatim then Photon fallback; if both fail returns formatted coordinates.
+    Callers should handle rate limiting (e.g. sleep between calls) when needed.
+    """
+    if lat is None or lon is None:
+        try:
+            return f'{float(lat or 0):.5f}, {float(lon or 0):.5f}'
+        except (TypeError, ValueError):
+            return ''
+    addr = _reverse_geocode(lat, lon)
+    if not addr:
+        addr = _reverse_geocode_photon(lat, lon)
+    if addr:
+        return addr
+    return f'{float(lat):.5f}, {float(lon):.5f}'
+
+
 def _get_time_ago(timestamp):
     """Return human-readable time ago string for a timestamp."""
     diff = timezone.now() - timestamp
-    total_seconds = int(diff.total_seconds())
+    total_seconds = int(round(diff.total_seconds()))
     if total_seconds < 0:
         return 'just now'
     if total_seconds < 60:
@@ -98,6 +189,32 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 100
     page_size_query_param = 'page_size'
     max_page_size = 500
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def resolve_address(request):
+    """
+    Resolve lat/lon to the same display address string as the live-tracking marker popup.
+    GET /api/tracking/resolve-address/?lat=23.83&lon=90.37
+    """
+    lat = request.query_params.get('lat')
+    lon = request.query_params.get('lon')
+    if lat is None or lon is None:
+        return Response(
+            {'success': False, 'message': 'lat and lon query parameters are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    try:
+        lat_f = float(lat)
+        lon_f = float(lon)
+    except (TypeError, ValueError):
+        return Response(
+            {'success': False, 'message': 'lat and lon must be numbers'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    address = get_display_address(lat_f, lon_f)
+    return Response({'success': True, 'address': address or ''})
 
 
 @api_view(['POST'])
@@ -145,8 +262,8 @@ def log_location(request):
         if serializer.is_valid():
             location_log = serializer.save()
             if not (location_log.address and location_log.address.strip()):
-                addr = _reverse_geocode(location_log.latitude, location_log.longitude)
-                if addr:
+                addr = get_display_address(location_log.latitude, location_log.longitude)
+                if addr and not _is_coordinates_only(addr):
                     location_log.address = addr
                     location_log.save(update_fields=['address'])
             logger.debug("log_location: location saved id=%s", location_log.id)
@@ -207,7 +324,7 @@ def live_locations(request):
 
         # Fetch the actual location records
         locations = []
-        for item in latest_timestamps:
+        for idx, item in enumerate(latest_timestamps):
             location = LocationLog.objects.filter(
                 employee_id=item['employee'],
                 timestamp=item['latest_time']
@@ -223,22 +340,20 @@ def live_locations(request):
                         profile_picture_url = request.build_absolute_uri(employee.profile_picture.url)
                     except Exception:
                         profile_picture_url = None
-                address = (location.address or '').strip()
-                if not address:
-                    addr = _reverse_geocode(location.latitude, location.longitude)
-                    if addr:
-                        location.address = addr
-                        location.save(update_fields=['address'])
-                        address = addr
-                if not address and employee:
-                    from attendance.models import DutySession
-                    open_session = DutySession.objects.filter(
-                        employee=employee, date=timezone.localdate(), end_time__isnull=True
-                    ).order_by('-start_time').first()
-                    if open_session and open_session.start_address:
-                        address = open_session.start_address
+                address = ''
+                try:
+                    if idx > 0:
+                        time_module.sleep(1)  # Nominatim allows 1 req/sec
+                    address = get_display_address(location.latitude, location.longitude)
+                    if address and not _is_coordinates_only(address):
                         location.address = address
                         location.save(update_fields=['address'])
+                except Exception as e:
+                    logger.warning('live_locations geocode for employee %s: %s', getattr(employee, 'id'), e)
+                if not address:
+                    lat, lng = location.latitude, location.longitude
+                    if lat is not None and lng is not None:
+                        address = f'{float(lat):.5f}, {float(lng):.5f}'
                 locations.append({
                     'employee_id': str(employee.id),
                     'employee_name': employee.name,
@@ -691,7 +806,7 @@ def dashboard_home(request):
         end_loc = (last_sess.end_address if last_sess and last_sess.end_time and last_sess.end_address else '—')
         total_seconds = 0
         for sess in DutySession.objects.filter(employee=att.employee, date=att.date, end_time__isnull=False):
-            total_seconds += int((sess.end_time - sess.start_time).total_seconds())
+            total_seconds += calculate_duration_seconds(sess.start_time, sess.end_time)
         recent_activities_enriched.append({
             'att': att,
             'start_location': start_loc or '—',
@@ -773,7 +888,7 @@ def dashboard_employee_list(request):
             current_seconds = None
             if open_session:
                 delta = timezone.now() - open_session.start_time
-                current_seconds = int(delta.total_seconds())
+                current_seconds = int(round(delta.total_seconds()))
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
@@ -806,7 +921,7 @@ def dashboard_employee_list(request):
             start_location = (first_session.start_address if first_session and first_session.start_address else '—')
             total_seconds = 0
             for sess in DutySession.objects.filter(employee=emp, date=selected_date, end_time__isnull=False):
-                total_seconds += int((sess.end_time - sess.start_time).total_seconds())
+                total_seconds += calculate_duration_seconds(sess.start_time, sess.end_time)
             latest_log = LocationLog.objects.filter(
                 employee=emp,
                 timestamp__date=selected_date,
@@ -958,6 +1073,7 @@ def export_csv(request):
     
     if report_type == 'daily':
         # Daily CSV export
+        from attendance.admin_filters import format_attendance_total_hours_from_sessions
         writer.writerow(['Daily Attendance Report'])
         writer.writerow(['Date:', reference_date.strftime('%A, %d %b %Y')])
         if department:
@@ -992,7 +1108,7 @@ def export_csv(request):
                 att.employee.department.name if att.employee.department else '—',
                 att.check_in_time or '—',
                 att.check_out_time or '—',
-                _hours_to_hhmmss(att.total_hours),
+                format_attendance_total_hours_from_sessions(att),
                 att.total_locations_logged,
                 att.status,
                 att.remarks or ''
@@ -1031,6 +1147,7 @@ def export_csv(request):
     
     elif report_type == 'monthly':
         # Monthly CSV export
+        from attendance.admin_filters import format_attendance_total_hours_from_sessions
         first_day = reference_date.replace(day=1)
         if reference_date.month == 12:
             last_day = reference_date.replace(year=reference_date.year + 1, month=1, day=1) - timedelta(days=1)
@@ -1085,7 +1202,7 @@ def export_csv(request):
                 att.employee.department.name if att.employee.department else '—',
                 att.check_in_time or '—',
                 att.check_out_time or '—',
-                _hours_to_hhmmss(att.total_hours),
+                format_attendance_total_hours_from_sessions(att),
                 att.status
             ])
     

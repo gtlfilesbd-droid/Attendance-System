@@ -2,6 +2,7 @@
 Shared admin mixin and helpers for report filters (Attendance, DutySession, LocationLog).
 """
 import json
+from .utils import calculate_duration_seconds
 from datetime import datetime, time
 from django.utils import timezone
 from employees.models import Employee, Department
@@ -135,3 +136,78 @@ def format_total_hours_hhmmss(hours):
         return f"{hrs:02d}:{mins:02d}:{secs:02d}"
     except (TypeError, ValueError):
         return '—'
+
+
+def format_duration_from_timestamps(start_time, end_time):
+    """
+    Compute duration from start_time and end_time (exact seconds), return HH:MM:SS.
+    Use this so Admin matches App / dashboard / reports (all use timestamp difference).
+    """
+    if start_time is None or end_time is None:
+        return '—'
+    try:
+        total_secs = calculate_duration_seconds(start_time, end_time)
+        if total_secs < 0:
+            return '—'
+        hrs, remainder = divmod(total_secs, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    except (TypeError, ValueError):
+        return '—'
+
+
+def _time_to_seconds(t):
+    """Convert time to seconds since midnight."""
+    if t is None:
+        return None
+    return t.hour * 3600 + t.minute * 60 + t.second
+
+
+def format_attendance_total_hours_from_check_times(check_in_time, check_out_time):
+    """
+    Compute duration between check_in and check_out (TimeField), return HH:MM:SS.
+    So Total hours column exactly matches the Check In and Check Out columns on the same row.
+    """
+    if check_in_time is None or check_out_time is None:
+        return '—'
+    start_secs = _time_to_seconds(check_in_time)
+    end_secs = _time_to_seconds(check_out_time)
+    if start_secs is None or end_secs is None:
+        return '—'
+    if end_secs >= start_secs:
+        total_secs = end_secs - start_secs
+    else:
+        # Overnight: e.g. 22:00 to 06:00
+        total_secs = (24 * 3600 - start_secs) + end_secs
+    if total_secs < 0:
+        return '—'
+    hrs, remainder = divmod(int(total_secs), 3600)
+    mins, secs = divmod(remainder, 60)
+    return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+
+
+def format_attendance_total_hours_from_sessions(attendance):
+    """
+    Prefer sum of DutySession durations when any DutySessions exist for this employee+date.
+    Fallback: use check_in/check_out when no sessions (e.g. manual entry).
+    """
+    from .models import DutySession
+    sessions = DutySession.objects.filter(
+        employee=attendance.employee,
+        date=attendance.date,
+        end_time__isnull=False,
+    ).order_by('start_time')
+    total_secs = 0
+    for sess in sessions:
+        if sess.start_time and sess.end_time:
+            total_secs += calculate_duration_seconds(sess.start_time, sess.end_time)
+    if total_secs > 0:
+        hrs, remainder = divmod(total_secs, 3600)
+        mins, secs = divmod(remainder, 60)
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}"
+    # No sessions: fallback to check_in/check_out
+    if attendance.check_in_time is not None and attendance.check_out_time is not None:
+        return format_attendance_total_hours_from_check_times(
+            attendance.check_in_time, attendance.check_out_time
+        )
+    return format_total_hours_hhmmss(attendance.total_hours) if attendance.total_hours else '—'

@@ -1,12 +1,14 @@
 """
 Celery tasks for attendance app
 """
+import logging
 from decimal import Decimal
 from celery import shared_task
 from django.utils import timezone
 from django.db.models import Q, Sum
 from datetime import timedelta
 from .models import DutySession, Attendance
+from .utils import calculate_duration_seconds
 from employees.models import Employee
 
 
@@ -197,8 +199,8 @@ def _auto_close_session(session, remark, end_lat=None, end_lon=None, end_addr=No
     session.end_latitude = end_lat
     session.end_longitude = end_lon
     session.end_address = end_addr
-    delta = session.end_time - session.start_time
-    session.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+    secs = calculate_duration_seconds(session.start_time, session.end_time)
+    session.total_hours = Decimal(secs) / Decimal(3600)
     session.remarks = remark
     session.save()
     _update_attendance_for_date(session.employee, session.date)
@@ -225,28 +227,41 @@ def auto_end_duty_sessions():
     for session in open_sessions:
         remark = None
 
+        # Normalize session start to timezone-aware for duration and LocationLog scope
+        session_start = session.start_time
+        if timezone.is_naive(session_start):
+            session_start = timezone.make_aware(session_start, timezone.get_current_timezone())
+
         # Priority 1: Date change
         if session.date < today:
             remark = "Date changes."
 
-        # Priority 2: 9 hours active
-        elif remark is None and (now - session.start_time).total_seconds() >= nine_hours_secs:
+        # Priority 2: 9 hours active (timezone-safe duration)
+        elif remark is None and (now - session_start).total_seconds() >= nine_hours_secs:
             remark = "9 hours active."
 
-        # Priority 3: 30 min no LocationLog
+        # Priority 3: 30 min no LocationLog (scoped to this session; timezone-safe comparison)
         elif remark is None:
             last_log = (
-                LocationLog.objects.filter(employee=session.employee)
+                LocationLog.objects.filter(
+                    employee=session.employee,
+                    timestamp__gte=session_start,
+                )
                 .order_by('-timestamp')
                 .values_list('timestamp', flat=True)
                 .first()
             )
+            if last_log is not None and timezone.is_naive(last_log):
+                last_log = timezone.make_aware(last_log, timezone.get_current_timezone())
             if last_log is None or last_log < cutoff_30min:
                 remark = "User kept mobile network turned off for 30 minutes."
 
         if remark:
             last_log_obj = (
-                LocationLog.objects.filter(employee=session.employee)
+                LocationLog.objects.filter(
+                    employee=session.employee,
+                    timestamp__gte=session_start,
+                )
                 .order_by('-timestamp')
                 .first()
             )
@@ -255,6 +270,10 @@ def auto_end_duty_sessions():
                 end_lat = last_log_obj.location.y if hasattr(last_log_obj.location, 'y') else None
                 end_lon = last_log_obj.location.x if hasattr(last_log_obj.location, 'x') else None
                 end_addr = last_log_obj.address
+            logging.getLogger(__name__).info(
+                "Auto-closed duty session id=%s employee=%s remark=%s",
+                session.id, getattr(session.employee, 'name', session.employee_id), remark,
+            )
             _auto_close_session(session, remark, end_lat=end_lat, end_lon=end_lon, end_addr=end_addr)
             closed += 1
 

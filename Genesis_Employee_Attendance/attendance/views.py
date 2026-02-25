@@ -9,8 +9,10 @@ from django.utils import timezone
 from django.db.models import Q, Count, Sum, Avg
 from datetime import datetime, timedelta
 from .models import Attendance, DutySession
+from .utils import calculate_duration_seconds
 from employees.models import Employee
 from tracking.models import LocationLog
+from tracking.views import get_display_address
 from .serializers import (
     AttendanceSerializer, AttendanceReportSerializer, DailyAttendanceSummarySerializer
 )
@@ -93,10 +95,18 @@ def start_duty(request):
             'success': False,
             'message': 'latitude and longitude must be numbers.',
         }, status=status.HTTP_400_BAD_REQUEST)
-    address = request.data.get('address') or ''
-
     now = timezone.now()
-    today = now.date()
+    # Use client-provided date (user's local date) if valid; otherwise server date
+    date_str = request.data.get('date')
+    if date_str:
+        try:
+            today = datetime.strptime(date_str, '%Y-%m-%d').date()
+        except (TypeError, ValueError):
+            today = now.date()
+    else:
+        today = now.date()
+
+    start_address = get_display_address(lat, lon) or None
 
     # Auto-close any existing open session for this employee (end at current location)
     open_sessions = DutySession.objects.filter(employee=employee, end_time__isnull=True)
@@ -104,9 +114,10 @@ def start_duty(request):
         sess.end_time = now
         sess.end_latitude = lat
         sess.end_longitude = lon
-        sess.end_address = address
-        delta = sess.end_time - sess.start_time
-        sess.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+        sess.end_address = get_display_address(lat, lon) or None
+        sess.remarks = "Auto-closed when new session started"
+        secs = calculate_duration_seconds(sess.start_time, sess.end_time)
+        sess.total_hours = Decimal(secs) / Decimal(3600)
         sess.save()
         # Update Attendance for that session's date
         _update_attendance_for_date(employee, sess.date)
@@ -117,7 +128,7 @@ def start_duty(request):
         start_time=now,
         start_latitude=lat,
         start_longitude=lon,
-        start_address=address or None,
+        start_address=start_address,
         end_time=None,
         total_hours=Decimal('0.00'),
     )
@@ -189,8 +200,6 @@ def end_duty(request):
             'success': False,
             'message': 'latitude and longitude must be numbers.',
         }, status=status.HTTP_400_BAD_REQUEST)
-    address = request.data.get('address') or ''
-
     session = DutySession.objects.filter(employee=employee, end_time__isnull=True).order_by('-start_time').first()
     if not session:
         return Response({
@@ -202,10 +211,10 @@ def end_duty(request):
     session.end_time = now
     session.end_latitude = lat
     session.end_longitude = lon
-    session.end_address = address or None
+    session.end_address = get_display_address(lat, lon) or None
     session.remarks = "User End this session"
-    delta = session.end_time - session.start_time
-    session.total_hours = round(Decimal(delta.total_seconds()) / Decimal(3600), 2)
+    secs = calculate_duration_seconds(session.start_time, session.end_time)
+    session.total_hours = Decimal(secs) / Decimal(3600)
     session.save()
 
     _update_attendance_for_date(employee, session.date)
@@ -278,7 +287,7 @@ def my_attendance(request):
         date__lte=end_date
     ).order_by('-date', '-start_time')
 
-    # Build by_date: group by date, each with sessions list and total_hours
+    # Build by_date: group by date, each with sessions list, duration_seconds, and total_hours
     from collections import defaultdict
     by_date_map = defaultdict(list)
     for sess in sessions_qs:
@@ -287,26 +296,31 @@ def my_attendance(request):
             (sess.end_address or f"{sess.end_latitude}, {sess.end_longitude}")
             if sess.end_time else None
         )
+        dur_secs = calculate_duration_seconds(sess.start_time, sess.end_time) if sess.end_time else 0
         by_date_map[sess.date].append({
             'start_time': sess.start_time.isoformat(),
             'start_location': start_location,
             'end_time': sess.end_time.isoformat() if sess.end_time else None,
             'end_location': end_location,
-            'total_hours': float(sess.total_hours),
+            'duration_seconds': dur_secs,
+            'total_hours': dur_secs / 3600.0,
         })
 
     by_date = []
-    total_hours_overall = Decimal('0.00')
+    total_seconds_overall = 0
     for date in sorted(by_date_map.keys(), reverse=True):
         # Sessions in chronological order (oldest first) per date
         sessions_list = sorted(by_date_map[date], key=lambda s: s['start_time'] or '')
-        date_total = sum(Decimal(str(s['total_hours'])) for s in sessions_list)
-        total_hours_overall += date_total
+        date_total_seconds = sum(s['duration_seconds'] for s in sessions_list)
+        date_total = date_total_seconds / 3600.0
+        total_seconds_overall += date_total_seconds
         by_date.append({
             'date': date.isoformat(),
             'sessions': sessions_list,
             'total_hours': float(date_total),
         })
+
+    total_hours_overall = total_seconds_overall / 3600.0
 
     # Summary (for compatibility and stats)
     att_queryset = Attendance.objects.filter(
@@ -323,7 +337,7 @@ def my_attendance(request):
         'half_day_count': att_queryset.filter(status='HALF_DAY').count(),
         'absent_count': att_queryset.filter(status='ABSENT').count(),
         'total_hours': float(total_hours_overall),
-        'average_hours': float(total_hours_overall / len(by_date)) if by_date else 0,
+        'average_hours': float(total_hours_overall / len(by_date)) if by_date else 0.0,
     }
 
     return Response({

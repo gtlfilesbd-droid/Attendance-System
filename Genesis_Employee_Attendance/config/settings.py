@@ -285,7 +285,10 @@ CELERY_BEAT_SCHEDULE = {
             'expires': 3600,  # Task expires after 1 hour if not executed
         }
     },
-    
+    'auto-end-duty-sessions': {
+        'task': 'attendance.auto_end_duty_sessions',
+        'schedule': crontab(minute='*/5'),  # Run every 5 minutes
+    },
     'send-location-reminder-10am': {
         'task': 'tracking.send_location_reminder',
         'schedule': crontab(hour=10, minute=0),  # 10:00 AM

@@ -3,7 +3,7 @@ Celery tasks for tracking app - Automated attendance calculation
 """
 from celery import shared_task
 from django.utils import timezone
-from django.db.models import Min, Max, Count
+from django.db.models import Min, Max, Count, Sum
 from datetime import datetime, timedelta, time
 import logging
 
@@ -90,7 +90,15 @@ def calculate_daily_attendance():
                 check_out_datetime += timedelta(days=1)
             
             duration = check_out_datetime - check_in_datetime
-            total_hours = round(duration.total_seconds() / 3600, 2)
+            # When DutySessions exist, use sum of session durations (not first-to-last span)
+            from attendance.models import DutySession
+            sessions_sum = DutySession.objects.filter(
+                employee=employee, date=today, end_time__isnull=False
+            ).aggregate(s=Sum('total_hours'))['s']
+            if sessions_sum is not None and float(sessions_sum) > 0:
+                total_hours = round(float(sessions_sum), 2)
+            else:
+                total_hours = round(duration.total_seconds() / 3600, 2)
             
             # Determine status
             late_cutoff = time(9, 30)  # 9:30 AM

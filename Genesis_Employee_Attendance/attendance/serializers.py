@@ -3,6 +3,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 from django.utils import timezone
 from .models import Attendance, DutySession
+from .utils import calculate_duration_seconds
 from employees.serializers import EmployeeProfileSerializer
 
 
@@ -174,7 +175,7 @@ class AttendanceReportSerializer(serializers.ModelSerializer):
         first_sess = None
         last_sess = None
         for sess in sessions_qs:
-            delta_secs = int((sess.end_time - sess.start_time).total_seconds()) if sess.end_time else 0
+            delta_secs = calculate_duration_seconds(sess.start_time, sess.end_time) if sess.end_time else 0
             total_seconds += delta_secs
             if first_sess is None:
                 first_sess = sess
