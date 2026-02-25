@@ -22,10 +22,11 @@ class ApiService {
   final Dio _dio = Dio();
   
   void initialize() {
+    _dio.interceptors.clear();
     _dio.options.baseUrl = AppConfig.baseUrl;
     _dio.options.connectTimeout = const Duration(seconds: 15);
     _dio.options.receiveTimeout = const Duration(seconds: 15);
-    
+
     // Add interceptors
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {

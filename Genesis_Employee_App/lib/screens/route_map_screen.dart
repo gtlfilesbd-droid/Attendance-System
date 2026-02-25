@@ -33,6 +33,7 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   /// End time for route filter (HH:mm:ss); default 23:59:00.
   TimeOfDay _endTime = const TimeOfDay(hour: 23, minute: 59);
   String? _loadError;
+  bool _isRefreshing = false;
 
   void _zoomIn() {
     final camera = _mapController.camera;
@@ -50,6 +51,17 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   void initState() {
     super.initState();
     _fetchRoute();
+  }
+
+  Future<void> _onRefresh() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    try {
+      ApiService().initialize();
+      await _fetchRoute();
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
+    }
   }
 
   Future<void> _fetchRoute() async {
@@ -242,6 +254,22 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Route'),
+        actions: [
+          IconButton(
+            icon: _isRefreshing
+                ? SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.iconTheme.color ?? colorScheme.onSurface,
+                    ),
+                  )
+                : const Icon(Icons.refresh),
+            onPressed: _isRefreshing ? null : _onRefresh,
+            tooltip: 'Refresh route',
+          ),
+        ],
       ),
       body: Column(
         children: [

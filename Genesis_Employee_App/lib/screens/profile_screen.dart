@@ -40,6 +40,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _onRefresh() async {
+    ApiService().initialize();
+    await _loadProfile();
+  }
+
   Future<void> _logout() async {
     await _authService.logout();
     if (mounted) {
@@ -97,7 +102,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadProfile,
+        onRefresh: _onRefresh,
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),

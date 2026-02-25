@@ -322,6 +322,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _onRefresh() async {
+    ApiService().initialize();
+    await LocationService.syncOfflineData();
+    await _loadData();
+    await _loadTodayDutyTime();
+  }
+
   Future<void> _fetchCurrentPlaceName() async {
     try {
       final position = await Geolocator.getCurrentPosition(
@@ -557,20 +564,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: colorScheme.surfaceContainerLowest,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildHeader(context, colorScheme),
-              const SizedBox(height: 24),
-              _buildTimeAndStatusCard(context, theme, colorScheme),
-              const SizedBox(height: 24),
-              _buildQuickActionCards(context, theme, colorScheme),
-              const SizedBox(height: 24),
-              _buildDutyTimeCard(context, theme, colorScheme),
-              const SizedBox(height: 20),
-            ],
+        child: RefreshIndicator(
+          onRefresh: _onRefresh,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(context, colorScheme),
+                const SizedBox(height: 24),
+                _buildTimeAndStatusCard(context, theme, colorScheme),
+                const SizedBox(height: 24),
+                _buildQuickActionCards(context, theme, colorScheme),
+                const SizedBox(height: 24),
+                _buildDutyTimeCard(context, theme, colorScheme),
+                const SizedBox(height: 20),
+              ],
+            ),
           ),
         ),
       ),

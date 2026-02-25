@@ -192,10 +192,10 @@ def _update_attendance_for_date(employee, date):
     )
 
 
-def _auto_close_session(session, remark, end_lat=None, end_lon=None, end_addr=None):
+def _auto_close_session(session, remark, end_lat=None, end_lon=None, end_addr=None, end_time=None):
     """Close a DutySession with remark. Updates end_time, total_hours, end location, remarks."""
     now = timezone.now()
-    session.end_time = now
+    session.end_time = end_time if end_time is not None else now
     session.end_latitude = end_lat
     session.end_longitude = end_lon
     session.end_address = end_addr
@@ -226,6 +226,7 @@ def auto_end_duty_sessions():
 
     for session in open_sessions:
         remark = None
+        auto_close_end_time = None  # For 30-min case: last location + 30 min (clamped to now)
 
         # Normalize session start to timezone-aware for duration and LocationLog scope
         session_start = session.start_time
@@ -255,6 +256,9 @@ def auto_end_duty_sessions():
                 last_log = timezone.make_aware(last_log, timezone.get_current_timezone())
             if last_log is None or last_log < cutoff_30min:
                 remark = "User kept mobile network turned off for 30 minutes."
+                if last_log is not None:
+                    computed = last_log + timedelta(minutes=30)
+                    auto_close_end_time = min(computed, now)
 
         if remark:
             last_log_obj = (
@@ -274,7 +278,11 @@ def auto_end_duty_sessions():
                 "Auto-closed duty session id=%s employee=%s remark=%s",
                 session.id, getattr(session.employee, 'name', session.employee_id), remark,
             )
-            _auto_close_session(session, remark, end_lat=end_lat, end_lon=end_lon, end_addr=end_addr)
+            _auto_close_session(
+                session, remark,
+                end_lat=end_lat, end_lon=end_lon, end_addr=end_addr,
+                end_time=auto_close_end_time,
+            )
             closed += 1
 
     return f"Auto-closed {closed} duty sessions"

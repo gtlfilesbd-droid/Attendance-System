@@ -51,6 +51,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  Future<void> _onRefresh() async {
+    ApiService().initialize();
+    await _fetchAttendance();
+  }
+
   Future<void> _pickStartDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -298,7 +303,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             ),
                           )
                         : RefreshIndicator(
-                      onRefresh: _fetchAttendance,
+                      onRefresh: _onRefresh,
                       child: ListView.builder(
                         itemCount: _byDate.length + 1,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
