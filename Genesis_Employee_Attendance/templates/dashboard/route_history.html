@@ -126,6 +126,63 @@
         color: white;
         border-color: var(--primary);
     }
+
+    .route-summary-card {
+        background: white;
+        padding: 0.75rem 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        border-left: 4px solid var(--primary, #2563eb);
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1rem;
+    }
+    .route-summary-card #routeSummary {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 1rem;
+        width: 100%;
+    }
+    .route-summary-distance {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: var(--dark, #1e293b);
+    }
+    .route-summary-distance .route-summary-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2rem;
+        height: 2rem;
+        border-radius: 8px;
+        background: rgba(37, 99, 235, 0.1);
+        color: var(--primary, #2563eb);
+    }
+    .route-summary-range {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        color: #64748b;
+    }
+    .route-summary-range .route-summary-range-icon {
+        color: #94a3b8;
+    }
+    .route-summary-placeholder {
+        color: #94a3b8;
+        font-size: 0.9rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .route-summary-placeholder i {
+        color: #cbd5e1;
+    }
 </style>
 {% endblock %}
 
@@ -177,6 +234,17 @@
     <div class="col-12">
         <div class="stat-card p-0">
             <div id="routeMap"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Route summary: distance and time range (shown when route is loaded) -->
+<div class="row mb-3" id="routeSummaryRow">
+    <div class="col-12">
+        <div class="route-summary-card">
+            <div id="routeSummary">
+                <span class="route-summary-placeholder"><i class="fas fa-route"></i>Load a route to see distance</span>
+            </div>
         </div>
     </div>
 </div>
@@ -346,11 +414,8 @@
                 routeData = routeDataResponse.locations;
                 displayRoute();
                 updateTimeline();
-                
-                // Display route stats if available
-                if (routeDataResponse.total_distance_km) {
-                    console.log('Route distance:', routeDataResponse.total_distance_km, 'km');
-                }
+                const km = routeDataResponse.total_distance_km ?? 0;
+                updateRouteSummary(km, startTime, endTime);
             } else {
                 showAlert('No route data found for the selected criteria.', 'info');
                 clearRoute();
@@ -365,7 +430,25 @@
             if (timeline) {
                 mapTracker.hideLoading('routeTimeline', '<div class="text-center py-4 text-muted">Error loading route</div>');
             }
+            clearRouteSummary();
         }
+    }
+
+    function updateRouteSummary(km, startTimeVal, endTimeVal) {
+        const el = document.getElementById('routeSummary');
+        if (!el) return;
+        const distanceLabel = (km != null && km !== '') ? `Distance: ${Number(km).toFixed(2)} km` : 'Distance: —';
+        const startStr = (startTimeVal && startTimeVal.trim()) ? startTimeVal.trim() : '00:00';
+        const endStr = (endTimeVal && endTimeVal.trim()) ? endTimeVal.trim() : '23:59';
+        const rangeStr = (!startTimeVal && !endTimeVal) ? 'Full day (00:00 – 23:59)' : `Between ${startStr} and ${endStr}`;
+        el.innerHTML = '<span class="route-summary-distance"><span class="route-summary-icon"><i class="fas fa-route"></i></span>' + distanceLabel + '</span>' +
+            '<span class="route-summary-range"><i class="fas fa-clock route-summary-range-icon"></i>' + rangeStr + '</span>';
+    }
+
+    function clearRouteSummary() {
+        const el = document.getElementById('routeSummary');
+        if (!el) return;
+        el.innerHTML = '<span class="route-summary-placeholder"><i class="fas fa-route"></i>Load a route to see distance</span>';
     }
     
     // Display route on map
@@ -479,6 +562,7 @@
             mapTracker.routeMarkers = [];
         }
         routeData = [];
+        clearRouteSummary();
     }
     
     // Toggle playback

@@ -241,7 +241,7 @@
         const marker = mapTracker.markers[employeeId];
         if (marker && mapTracker.map) {
             const latLng = marker.getLatLng();
-            mapTracker.map.setView([latLng.lat, latLng.lng], 16);
+            mapTracker.map.setView([latLng.lat, latLng.lng], 19);
             marker.openPopup();
         }
     }
