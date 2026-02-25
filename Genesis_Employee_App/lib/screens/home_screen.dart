@@ -324,9 +324,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     if (gen != _loadTodayDutyTimeGeneration) return;
     setState(() {
+      _dutyTimeLoadError = loadError;
+      if (loadError != null) {
+        // Preserve last known state for same day so we don't show wrong Offline/Start duty on network failure.
+        final today = DateTime(now.year, now.month, now.day);
+        if (_dutyStartTime != null &&
+            _dutyStartTime!.year == today.year &&
+            _dutyStartTime!.month == today.month &&
+            _dutyStartTime!.day == today.day) {
+          // Keep _dutyStartTime, _todayBaseSeconds, _todayDate unchanged
+          return;
+        }
+      }
       _todayBaseSeconds = baseSeconds;
       _todayDate = DateTime(now.year, now.month, now.day);
-      _dutyTimeLoadError = loadError;
       if (openSessionStart != null) {
         _dutyStartTime = openSessionStart;
       }
@@ -334,14 +345,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _checkServiceStatus();
   }
 
+  static const Duration _serviceStatusCheckTimeout = Duration(seconds: 5);
+
   Future<void> _checkServiceStatus() async {
     try {
-      final isRunning = await FlutterBackgroundService().isRunning();
+      final isRunning = await FlutterBackgroundService()
+          .isRunning()
+          .timeout(_serviceStatusCheckTimeout);
       if (mounted) {
         setState(() {
           _isTracking = isRunning;
           _statusCheckError = false;
         });
+      }
+    } on TimeoutException {
+      if (mounted) {
+        setState(() => _statusCheckError = true);
       }
     } catch (_) {
       if (mounted) {
@@ -429,6 +448,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  static const Duration _dutyDialogTimeout = Duration(seconds: 25);
+
   void _showDutyLoadingDialog(BuildContext context, String message) {
     showDialog(
       context: context,
@@ -458,15 +479,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       bool success = false;
       bool hadException = false;
       try {
-        final position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-        );
-        final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-        success = await ApiService().endDuty(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          address: address,
-        );
+        await (() async {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+          );
+          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+          success = await ApiService().endDuty(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            address: address,
+          );
+        }()).timeout(_dutyDialogTimeout);
+      } on TimeoutException {
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Took too long. Check connection and try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       } catch (e) {
         success = false;
         hadException = true;
@@ -523,67 +555,78 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _showDutyLoadingDialog(context, 'Starting duty...');
       }
       try {
-        Map<String, dynamic>? startData;
-        try {
-          final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-          final localDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-          startData = await ApiService().startDuty(
-            latitude: position.latitude,
-            longitude: position.longitude,
-            address: address,
-            date: localDateStr,
-          );
-        } catch (_) {}
-        await _locationService.startTracking();
-        await Future.delayed(const Duration(seconds: 1));
-        final started = await service.isRunning();
-        if (mounted) {
-          DateTime? dutyStart;
-          if (started && startData != null) {
-            final startTimeStr = startData['start_time'] as String?;
-            if (startTimeStr != null && startTimeStr.isNotEmpty) {
-              try {
-                final dt = DateTime.parse(startTimeStr);
-                dutyStart = dt.isUtc ? dt.toLocal() : dt;
-              } catch (_) {}
+        await (() async {
+          Map<String, dynamic>? startData;
+          try {
+            final position = await Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.high,
+            );
+            final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+            final localDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+            startData = await ApiService().startDuty(
+              latitude: position.latitude,
+              longitude: position.longitude,
+              address: address,
+              date: localDateStr,
+            );
+          } catch (_) {}
+          await _locationService.startTracking();
+          await Future.delayed(const Duration(seconds: 1));
+          final started = await service.isRunning();
+          if (mounted) {
+            DateTime? dutyStart;
+            if (started && startData != null) {
+              final startTimeStr = startData['start_time'] as String?;
+              if (startTimeStr != null && startTimeStr.isNotEmpty) {
+                try {
+                  final dt = DateTime.parse(startTimeStr);
+                  dutyStart = dt.isUtc ? dt.toLocal() : dt;
+                } catch (_) {}
+              }
             }
+            if (dutyStart != null && dutyStart.isAfter(DateTime.now())) {
+              dutyStart = DateTime.now();
+            }
+            setState(() {
+              _isTracking = started;
+              _dutyStartTime = dutyStart;
+            });
           }
-          if (dutyStart != null && dutyStart.isAfter(DateTime.now())) {
-            dutyStart = DateTime.now();
+          if (!started && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+            );
+          } else if (started && mounted) {
+            if (startData == null && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Duty started locally. Will sync when connected.'),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+            }
+            final hasBackground = await _locationService.hasBackgroundLocationPermission();
+            if (!hasBackground && mounted && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
+                  duration: Duration(seconds: 4),
+                ),
+              );
+            }
+            Future.delayed(const Duration(seconds: 2), () {
+              if (mounted) _fetchCurrentPlaceName();
+            });
           }
-          setState(() {
-            _isTracking = started;
-            _dutyStartTime = dutyStart;
-          });
-        }
-        if (!started && mounted) {
+        }()).timeout(_dutyDialogTimeout);
+      } on TimeoutException {
+        if (mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+            const SnackBar(
+              content: Text('Took too long. Check connection and try again.'),
+              backgroundColor: Colors.red,
+            ),
           );
-        } else if (started && mounted) {
-          if (startData == null && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Duty started locally. Will sync when connected.'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          final hasBackground = await _locationService.hasBackgroundLocationPermission();
-          if (!hasBackground && mounted && context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
-                duration: Duration(seconds: 4),
-              ),
-            );
-          }
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) _fetchCurrentPlaceName();
-          });
         }
       } finally {
         if (mounted && context.mounted) {

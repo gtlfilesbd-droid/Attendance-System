@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'screens/login_screen.dart';
@@ -17,20 +18,11 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
-  // Initialize API Service
+  // Initialize API Service (lightweight, sync)
   ApiService().initialize();
 
-  // Initialize Background Service
-  await LocationService().initializeService();
-
-  // Initialize Firebase for FCM (duty reminder push when app is closed)
-  try {
-    await PushNotificationService.initialize();
-  } catch (e) {
-    // If google-services.json is missing, app still runs; add file for push
-    assert(true, 'Firebase init skipped: $e');
-  }
-
+  // Run app immediately so first frame (splash) shows without blocking.
+  // LocationService + PushNotification (permissions) run after first frame in AppLifecycleWrapper.
   runApp(const AppLifecycleWrapper());
 }
 
@@ -47,11 +39,39 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
     with WidgetsBindingObserver {
   final GlobalKey<ScaffoldMessengerState> _scaffoldKey =
       GlobalKey<ScaffoldMessengerState>();
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+  final Completer<void> _initCompleter = Completer<void>();
+  Future<void> get initFuture => _initCompleter.future;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ApiService.onSessionExpired = _navigateToLogin;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _runInitAfterFirstFrame());
+  }
+
+  Future<void> _runInitAfterFirstFrame() async {
+    try {
+      await Future.wait([
+        LocationService().initializeService(),
+        PushNotificationService.initialize(),
+      ]);
+    } catch (e) {
+      // e.g. Firebase init skipped if google-services.json missing
+      assert(true, 'Init skipped: $e');
+    } finally {
+      if (!_initCompleter.isCompleted) {
+        _initCompleter.complete();
+      }
+    }
+  }
+
+  void _navigateToLogin() {
+    _navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   @override
@@ -85,18 +105,30 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
 
   @override
   Widget build(BuildContext context) {
-    return GenesisEmployeeApp(scaffoldMessengerKey: _scaffoldKey);
+    return GenesisEmployeeApp(
+      scaffoldMessengerKey: _scaffoldKey,
+      navigatorKey: _navigatorKey,
+      initFuture: initFuture,
+    );
   }
 }
 
 class GenesisEmployeeApp extends StatelessWidget {
-  const GenesisEmployeeApp({super.key, this.scaffoldMessengerKey});
+  const GenesisEmployeeApp({
+    super.key,
+    this.scaffoldMessengerKey,
+    this.navigatorKey,
+    this.initFuture,
+  });
 
   final GlobalKey<ScaffoldMessengerState>? scaffoldMessengerKey;
+  final GlobalKey<NavigatorState>? navigatorKey;
+  final Future<void>? initFuture;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: navigatorKey,
       scaffoldMessengerKey: scaffoldMessengerKey,
       title: 'Genesis Employee',
       debugShowCheckedModeBanner: false,
@@ -117,14 +149,16 @@ class GenesisEmployeeApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const SplashScreen(),
+      home: SplashScreen(initFuture: initFuture),
     );
   }
 }
 
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.initFuture});
+
+  final Future<void>? initFuture;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -139,16 +173,20 @@ class _SplashScreenState extends State<SplashScreen> {
     _checkLoginStatus();
   }
 
-  _checkLoginStatus() async {
-    await Future.delayed(const Duration(seconds: 2));
+  Future<void> _checkLoginStatus() async {
+    // Wait for both: min splash time (2s) and permissions + services init (before login).
+    await Future.wait([
+      Future.delayed(const Duration(seconds: 2)),
+      widget.initFuture ?? Future.value(),
+    ]);
     final isLoggedIn = await _authService.isLoggedIn();
-    
+
     if (mounted) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => 
-            isLoggedIn ? const HomeScreen() : const LoginScreen(),
+          builder: (context) =>
+              isLoggedIn ? const HomeScreen() : const LoginScreen(),
         ),
       );
     }

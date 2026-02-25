@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
@@ -70,7 +71,8 @@ class ForegroundRefreshService {
     _refreshing = true;
     try {
       ApiService().initialize();
-      await LocationService.syncOfflineData();
+      // Run sync in background so resume flow is not blocked; listeners get fresh data immediately.
+      unawaited(LocationService.syncOfflineData());
       _lastRefreshAt = now;
 
       for (final listener in List<VoidCallback>.from(_listeners)) {

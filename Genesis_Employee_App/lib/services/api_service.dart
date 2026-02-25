@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import '../config/app_config.dart';
 import 'auth_service.dart';
 
@@ -20,6 +21,17 @@ class ApiService {
   }
   
   ApiService._internal();
+
+  /// Called when session expires (401 and refresh failed). Set by app to navigate to LoginScreen.
+  static void Function()? onSessionExpired;
+
+  static void _navigateToLoginOnSessionExpired() {
+    final cb = onSessionExpired;
+    if (cb != null) {
+      // Defer so we don't navigate during interceptor execution.
+      WidgetsBinding.instance.addPostFrameCallback((_) => cb());
+    }
+  }
 
   /// Test-only: when set, getMyProfile() returns this instead of calling the API.
   static Future<Map<String, dynamic>?> Function()? mockGetMyProfile;
@@ -103,11 +115,13 @@ class ApiService {
               }
             }
             
-            // If refresh failed, logout
+            // If refresh failed, logout and navigate to login
             await authService.logout();
+            _navigateToLoginOnSessionExpired();
           } catch (refreshError) {
             print('Token refresh failed: $refreshError');
             await AuthService().logout();
+            _navigateToLoginOnSessionExpired();
           }
         }
         return handler.next(e);

@@ -243,18 +243,29 @@ class LocationService {
     }
   }
 
+  /// Max wall-clock time for one sync run; rest is synced on next resume or pull-to-refresh.
+  static const Duration maxSyncDuration = Duration(seconds: 90);
+  /// Max points to process per sync run to avoid long blocks; rest on next run.
+  static const int maxPointsPerSyncRun = 150;
+
   static Future<void> syncOfflineData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final List<String> offlineData = prefs.getStringList('offline_locations') ?? [];
-      
+
       if (offlineData.isEmpty) return;
-      
+
       print("FLUTTER_BG_SERVICE: Syncing ${offlineData.length} offline records...");
-      
+      final stopAt = DateTime.now().add(maxSyncDuration);
       final List<String> remainingData = [];
-      
-      for (String jsonStr in offlineData) {
+      int processed = 0;
+
+      for (int i = 0; i < offlineData.length; i++) {
+        if (DateTime.now().isAfter(stopAt) || processed >= maxPointsPerSyncRun) {
+          remainingData.addAll(offlineData.sublist(i));
+          break;
+        }
+        final String jsonStr = offlineData[i];
         try {
           final data = jsonDecode(jsonStr) as Map<String, dynamic>;
           final lat = data['latitude'];
@@ -285,17 +296,19 @@ class LocationService {
           );
           if (!success) {
             remainingData.add(jsonStr);
+          } else {
+            processed++;
           }
         } catch (e) {
           remainingData.add(jsonStr);
         }
       }
-      
-      if (remainingData.length != offlineData.length) {
-         await prefs.setStringList('offline_locations', remainingData);
-         print("FLUTTER_BG_SERVICE: Sync complete. Remaining: ${remainingData.length}");
+
+      final toStore = remainingData;
+      if (toStore.length != offlineData.length || toStore.isNotEmpty) {
+        await prefs.setStringList('offline_locations', toStore);
+        print("FLUTTER_BG_SERVICE: Sync run done. Remaining: ${toStore.length}");
       }
-      
     } catch (e) {
       print("FLUTTER_BG_SERVICE: Error syncing $e");
     }
