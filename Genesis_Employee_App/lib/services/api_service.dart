@@ -435,6 +435,7 @@ class ApiService {
 
   /// Get My Attendance
   /// GET /attendance/my-attendance/?start_date=X&end_date=Y
+  /// Retries up to 2 times with 2s delay on failure before returning error.
   Future<Map<String, dynamic>> getMyAttendance({
     String? startDate,
     String? endDate,
@@ -442,26 +443,36 @@ class ApiService {
     if (mockGetMyAttendance != null) {
       return mockGetMyAttendance!(startDate: startDate, endDate: endDate);
     }
-    try {
-      final queryParams = <String, dynamic>{};
-      if (startDate != null) queryParams['start_date'] = startDate;
-      if (endDate != null) queryParams['end_date'] = endDate;
+    const maxAttempts = 3;
+    const retryDelay = Duration(seconds: 2);
+    final queryParams = <String, dynamic>{};
+    if (startDate != null) queryParams['start_date'] = startDate;
+    if (endDate != null) queryParams['end_date'] = endDate;
 
-      final response = await _dio.get(
-        AppConfig.myAttendanceEndpoint,
-        queryParameters: queryParams,
-      );
-      
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return response.data['data'] as Map<String, dynamic>;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final response = await _dio.get(
+          AppConfig.myAttendanceEndpoint,
+          queryParameters: queryParams,
+        );
+        if (response.statusCode == 200 && response.data['success'] == true) {
+          return response.data['data'] as Map<String, dynamic>;
+        }
+        return {'by_date': []};
+      } catch (e) {
+        print('API: getMyAttendance error (attempt $attempt/$maxAttempts): $e');
+        if (attempt == maxAttempts) {
+          return {
+            'by_date': [],
+            'error': "Couldn't load attendance. Check connection.",
+          };
+        }
+        await Future.delayed(retryDelay);
       }
-      return {'by_date': []};
-    } catch (e) {
-      print('API: getMyAttendance error: $e');
-      return {
-        'by_date': [],
-        'error': "Couldn't load attendance. Check connection.",
-      };
     }
+    return {
+      'by_date': [],
+      'error': "Couldn't load attendance. Check connection.",
+    };
   }
 }

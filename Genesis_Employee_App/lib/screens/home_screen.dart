@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 import '../services/auth_service.dart';
@@ -118,6 +120,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _dutyTimeLoadError;
   /// Set when background service status check fails (e.g. exception).
   bool _statusCheckError = false;
+  /// Network connectivity (connectivity_plus; does not guarantee internet reachability).
+  bool _hasNetwork = true;
+  bool _isRefreshingLocation = false;
 
   @override
   void initState() {
@@ -129,9 +134,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
         _startTimer();
-        // Stop any leftover tracking from a previous session so tracking is off until user presses Start Duty
-        await _locationService.stopTracking();
-        if (mounted) await _loadTodayDutyTime();
+        // Load duty state first; then start or stop tracking based on open session (enterprise: single source of truth from backend)
+        await _loadTodayDutyTime();
+        if (!mounted) return;
+        if (_dutyStartTime != null) {
+          await _locationService.startTracking();
+          await _checkServiceStatus();
+        } else {
+          await _locationService.stopTracking();
+          await _checkServiceStatus();
+        }
+        if (mounted) await _checkConnectivity();
       }
     });
     _fetchCurrentPlaceName().then((_) {
@@ -369,15 +382,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _checkConnectivity() async {
+    try {
+      final result = await Connectivity().checkConnectivity();
+      final hasNetwork = result.isNotEmpty &&
+          result.any((r) => r != ConnectivityResult.none);
+      if (mounted) {
+        setState(() => _hasNetwork = hasNetwork);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _hasNetwork = false);
+      }
+    }
+  }
+
   Future<void> _onRefresh() async {
     ApiService().initialize();
-    await LocationService.syncOfflineData();
+    // Run sync in background so refresh does not block UI (up to 90s); do not await
+    unawaited((() async {
+      final hasOffline = await LocationService.hasPendingOfflineData();
+      if (hasOffline && mounted && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Offline data syncing in background')),
+        );
+      }
+      await LocationService.syncOfflineData();
+    })());
+    await _checkConnectivity();
     await _loadData();
     await _loadTodayDutyTime();
     await _checkServiceStatus();
   }
 
   Future<void> _fetchCurrentPlaceName() async {
+    if (_isRefreshingLocation) return;
+    if (mounted) {
+      setState(() => _isRefreshingLocation = true);
+    }
     try {
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
@@ -390,20 +432,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (resolved != null && resolved.isNotEmpty && mounted) {
         setState(() {
           _currentPlaceName = resolved;
+          _isRefreshingLocation = false;
         });
         return;
       }
-      final nominatimName = await _nominatimReverseGeocode(
-        position.latitude,
-        position.longitude,
-      );
+      // Run Nominatim HTTP + parse off main isolate to avoid UI jank
+      final lat = position.latitude;
+      final lng = position.longitude;
+      final nominatimName = await Isolate.run(() => _nominatimReverseGeocode(lat, lng));
       if (nominatimName != null && nominatimName.isNotEmpty && mounted) {
         setState(() {
           _currentPlaceName = nominatimName;
+          _isRefreshingLocation = false;
         });
         return;
       }
-      // Fall back to platform geocoding
+      // Fall back to platform geocoding (runs on main isolate)
       final placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
@@ -437,12 +481,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) {
         setState(() {
           _currentPlaceName = placeName;
+          _isRefreshingLocation = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _currentPlaceName = 'Location unavailable';
+          _isRefreshingLocation = false;
         });
       }
     }
@@ -469,9 +515,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Future<void> _toggleTracking() async {
     final service = FlutterBackgroundService();
+    // Use duty state (open session) as source of truth for action, not just service.isRunning()
+    final onDuty = _dutyStartTime != null;
     final isRunning = await service.isRunning();
 
-    if (isRunning) {
+    if (onDuty) {
       // End duty: show loading, get position, send to backend; only stop tracking if backend confirms success
       if (mounted && context.mounted) {
         _showDutyLoadingDialog(context, 'Ending duty...');
@@ -813,7 +861,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    _statusCheckError ? 'Status unavailable' : (_isTracking ? 'Online' : 'Offline'),
+                    _statusCheckError ? 'Status unavailable' : (_isTracking ? 'Tracking: Active' : 'Tracking: Inactive'),
                     style: TextStyle(
                       color: _statusCheckError ? colorScheme.onSurfaceVariant : (_isTracking ? Colors.green : Colors.red),
                       fontWeight: FontWeight.w600,
@@ -823,6 +871,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
+            if (!_hasNetwork) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.wifi_off, size: 14, color: colorScheme.error),
+                  const SizedBox(width: 6),
+                  Text(
+                    'No internet',
+                    style: TextStyle(fontSize: 12, color: colorScheme.error, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
             Divider(height: 20, color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
             const SizedBox(height: 16),
@@ -868,15 +930,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       Tooltip(
                         message: 'Refresh location',
                         child: IconButton(
-                          icon: Icon(Icons.refresh, size: 22, color: colorScheme.primary),
-                          onPressed: () async {
-                            await _fetchCurrentPlaceName();
-                            if (mounted && context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Location refreshed')),
-                              );
-                            }
-                          },
+                          icon: _isRefreshingLocation
+                              ? SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary),
+                                )
+                              : Icon(Icons.refresh, size: 22, color: colorScheme.primary),
+                          onPressed: _isRefreshingLocation
+                              ? null
+                              : () async {
+                                  await _fetchCurrentPlaceName();
+                                  if (mounted && context.mounted && !_isRefreshingLocation) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Location refreshed')),
+                                    );
+                                  }
+                                },
                           style: IconButton.styleFrom(
                             backgroundColor: colorScheme.surfaceContainerHighest,
                             minimumSize: const Size(44, 44),
@@ -894,13 +964,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: _toggleTracking,
-                icon: Icon(_isTracking ? Icons.stop_circle : Icons.play_circle_filled, size: 22),
+                icon: Icon(_dutyStartTime != null ? Icons.stop_circle : Icons.play_circle_filled, size: 22),
                 label: Text(
-                  _isTracking ? 'END DUTY' : 'START DUTY',
+                  _dutyStartTime != null ? 'END DUTY' : 'START DUTY',
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _isTracking ? colorScheme.error : Colors.green,
+                  backgroundColor: _dutyStartTime != null ? colorScheme.error : Colors.green,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   elevation: 3,

@@ -71,7 +71,7 @@ class ForegroundRefreshService {
     _refreshing = true;
     try {
       ApiService().initialize();
-      // Run sync in background so resume flow is not blocked; listeners get fresh data immediately.
+      // Do not await: sync can take up to 90s; run in background so UI and listeners are not blocked.
       unawaited(LocationService.syncOfflineData());
       _lastRefreshAt = now;
 

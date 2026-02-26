@@ -248,6 +248,17 @@ class LocationService {
   /// Max points to process per sync run to avoid long blocks; rest on next run.
   static const int maxPointsPerSyncRun = 150;
 
+  /// Returns true if there are offline locations waiting to be synced.
+  static Future<bool> hasPendingOfflineData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList('offline_locations') ?? [];
+      return list.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> syncOfflineData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
