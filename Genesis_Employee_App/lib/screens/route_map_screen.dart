@@ -49,6 +49,8 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
   String? _loadError;
   bool _isRefreshing = false;
   int _fetchRouteRequestId = 0;
+  /// When play was started; used to show SnackBar if playback ends immediately (no time data).
+  DateTime? _playStartedAt;
 
   late final RouteAnimationController _animationController;
   late final RoutePlaybackController _playbackController;
@@ -70,15 +72,30 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
     super.initState();
     _animationController = RouteAnimationController();
     _playbackController = RoutePlaybackController(_animationController);
+    _playbackController.addListener(_onPlaybackChanged);
     ForegroundRefreshService().addListener(_onForegroundRefresh);
     _fetchRoute();
   }
 
   @override
   void dispose() {
+    _playbackController.removeListener(_onPlaybackChanged);
     _playbackController.pause();
     ForegroundRefreshService().removeListener(_onForegroundRefresh);
     super.dispose();
+  }
+
+  void _onPlaybackChanged() {
+    if (!_playbackController.isPlaying && _playStartedAt != null) {
+      final elapsed = DateTime.now().difference(_playStartedAt!);
+      final atEnd = _playbackController.currentPointIndex >= _playbackController.totalPoints - 1;
+      if (atEnd && _playbackController.totalPoints >= 2 && elapsed.inMilliseconds < 400 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Route has no time data; playback skipped.')),
+        );
+      }
+      _playStartedAt = null;
+    }
   }
 
   void _onForegroundRefresh() {
@@ -511,7 +528,10 @@ class _RouteMapScreenState extends State<RouteMapScreen> {
               ),
             ),
           ),
-          RoutePlaybackBar(playbackController: _playbackController),
+          RoutePlaybackBar(
+            playbackController: _playbackController,
+            onPlayPressed: () => setState(() => _playStartedAt = DateTime.now()),
+          ),
           if (_routePoints.isNotEmpty)
             ExpansionTile(
               title: Text(

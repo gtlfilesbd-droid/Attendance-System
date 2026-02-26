@@ -3,6 +3,8 @@ import 'package:genesis_employee_app/services/api_service.dart';
 import 'package:genesis_employee_app/services/auth_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('Location sending to backend', () {
     setUp(() async {
       await AuthService().logout();

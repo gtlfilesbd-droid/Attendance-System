@@ -36,6 +36,9 @@ class RoutePlaybackController extends ChangeNotifier {
   /// Total number of points (for progress text).
   int get totalPoints => _points.length;
 
+  /// True when playback can run (at least 2 points).
+  bool get canPlay => _points.length >= 2;
+
   /// Segment duration in ms from timestamps; fallback when missing.
   static const int _defaultSegmentDurationMs = 1000;
 
@@ -50,7 +53,10 @@ class RoutePlaybackController extends ChangeNotifier {
   }
 
   void play() {
-    if (_points.length < 2) return;
+    if (_points.length < 2) {
+      notifyListeners();
+      return;
+    }
     if (_currentPointIndex >= _points.length - 1) {
       reset();
     }

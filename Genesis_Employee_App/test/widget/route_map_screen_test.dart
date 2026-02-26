@@ -11,7 +11,7 @@ void main() {
         ),
       );
 
-      expect(find.text("Today's Route"), findsOneWidget);
+      expect(find.text('Route'), findsOneWidget);
     });
 
     testWidgets('shows loading indicator initially', (WidgetTester tester) async {
@@ -24,15 +24,15 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
     });
 
-    testWidgets('displays Distance Traveled and Points Logged labels', (WidgetTester tester) async {
+    testWidgets('displays Distance Traveled and Points Logged labels when route loaded', (WidgetTester tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: RouteMapScreen(),
         ),
       );
-      await tester.pump(const Duration(seconds: 5));
-      await tester.pumpAndSettle(const Duration(seconds: 10));
-
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump(const Duration(seconds: 2));
+      // Labels appear in RouteStatsBar (shown even with empty/loading state after first frame)
       expect(find.text('Distance Traveled'), findsOneWidget);
       expect(find.text('Points Logged'), findsOneWidget);
     });

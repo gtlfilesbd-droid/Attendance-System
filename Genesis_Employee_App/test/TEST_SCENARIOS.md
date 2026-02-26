@@ -115,3 +115,33 @@ flutter test integration_test/
 ```
 
 **Note:** Tests that import `LocationService`, `AuthService`, or `BackgroundWorker` load native plugins and can be slow or require a device. The working-hours test imports only `lib/utils/working_hours.dart` and runs quickly.
+
+---
+
+## Why `flutter test` (full suite) can fail
+
+Running `flutter test` with no arguments runs every test in the **host environment** (e.g. Windows or a headless VM), not on an Android/iOS device. Several tests fail there because:
+
+1. **Missing native plugins**
+   - **flutter_secure_storage** – No implementation for the secure-storage channel on desktop/VM. Any test that calls `AuthService` (e.g. `logout()`, `getToken()`) hits `MissingPluginException`.
+   - **flutter_background_service** – Supported only on Android and iOS. `LocationService.startTracking` / `stopTracking` and `BackgroundWorker.startService` throw on other platforms.
+   - **workmanager** – No implementation on this platform. `LocationService.scheduleTracking` throws `UnimplementedError`.
+
+2. **Widget tests**
+   - Some widget tests start timers or async work (e.g. `HomeScreen` loading). If the test ends before that completes, you can get "A Timer is still pending" or timeouts.
+   - A few tests depend on specific UI (e.g. a certain icon); if the UI changes, those tests fail.
+
+So the full suite is written for logic that depends on **plugins that only exist on a real device/emulator**. On desktop/CI without a device, those tests are expected to fail unless you mock the plugins or run only the tests that don’t use them.
+
+### Run only tests that pass without a device
+
+Use a subset that avoids Auth, Api, Location, and BackgroundWorker plugins:
+
+```bash
+# Pure Dart + route/playback/stats (no plugins)
+flutter test test/unit/working_hours_test.dart test/unit/route_playback_controller_test.dart test/widget/route_stats_bar_test.dart test/widget/route_map_screen_test.dart
+```
+
+To run all tests successfully you need either:
+- **Mocked services** (e.g. fake `AuthService` / `ApiService` / `LocationService` in tests), or
+- **Device/emulator** (e.g. `flutter test integration_test/` or run the app and plugin-dependent tests on Android/iOS).

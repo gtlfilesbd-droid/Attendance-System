@@ -5,10 +5,13 @@ import '../route_playback_controller.dart';
 /// Playback controls: Play/Pause, Reset, Speed selector, progress text, optional progress slider.
 class RoutePlaybackBar extends StatelessWidget {
   final RoutePlaybackController playbackController;
+  /// Called when the user taps play (before starting playback). Used e.g. to show SnackBar if playback ends immediately.
+  final VoidCallback? onPlayPressed;
 
   const RoutePlaybackBar({
     super.key,
     required this.playbackController,
+    this.onPlayPressed,
   });
 
   @override
@@ -21,7 +24,7 @@ class RoutePlaybackBar extends StatelessWidget {
         final total = playbackController.totalPoints;
         final currentIndex = playbackController.currentPointIndex;
         final current = currentIndex + 1;
-        final hasRoute = total > 0;
+        final canPlay = playbackController.canPlay;
         final maxIndex = total > 1 ? total - 1 : 0;
         return Material(
           elevation: 2,
@@ -37,18 +40,21 @@ class RoutePlaybackBar extends StatelessWidget {
                         playbackController.isPlaying ? Icons.pause : Icons.play_arrow,
                         color: colorScheme.primary,
                       ),
-                      onPressed: hasRoute ? () {
+                      onPressed: canPlay ? () {
                         if (playbackController.isPlaying) {
                           playbackController.pause();
                         } else {
+                          onPlayPressed?.call();
                           playbackController.play();
                         }
                       } : null,
-                      tooltip: playbackController.isPlaying ? 'Pause' : 'Play',
+                      tooltip: playbackController.isPlaying
+                          ? 'Pause'
+                          : (canPlay ? 'Play' : 'Need at least 2 points to play'),
                     ),
                     IconButton(
                       icon: Icon(Icons.replay, color: colorScheme.primary),
-                      onPressed: hasRoute ? () => playbackController.reset() : null,
+                      onPressed: canPlay ? () => playbackController.reset() : null,
                       tooltip: 'Reset',
                     ),
                     IconButton(
@@ -56,7 +62,7 @@ class RoutePlaybackBar extends StatelessWidget {
                         playbackController.followPlayback ? Icons.my_location : Icons.location_searching,
                         color: playbackController.followPlayback ? colorScheme.primary : colorScheme.onSurfaceVariant,
                       ),
-                      onPressed: hasRoute ? () => playbackController.setFollowPlayback(!playbackController.followPlayback) : null,
+                      onPressed: canPlay ? () => playbackController.setFollowPlayback(!playbackController.followPlayback) : null,
                       tooltip: playbackController.followPlayback ? 'Following playback' : 'Follow playback',
                     ),
                     const SizedBox(width: 8),
@@ -67,7 +73,7 @@ class RoutePlaybackBar extends StatelessWidget {
                         child: ChoiceChip(
                           label: Text('${speed}x'),
                           selected: isSelected,
-                          onSelected: hasRoute
+                          onSelected: canPlay
                               ? (_) => playbackController.setSpeed(speed)
                               : null,
                         ),
@@ -82,7 +88,7 @@ class RoutePlaybackBar extends StatelessWidget {
                     ),
                   ],
                 ),
-                if (hasRoute && maxIndex > 0)
+                if (canPlay && maxIndex > 0)
                   SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                       overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),

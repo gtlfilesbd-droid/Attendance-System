@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:genesis_employee_app/services/location_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('LocationService', () {
     test('startTracking does not throw', () async {
       final service = LocationService();
