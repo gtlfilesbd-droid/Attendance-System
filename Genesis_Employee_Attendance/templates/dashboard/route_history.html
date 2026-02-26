@@ -173,6 +173,16 @@
     .route-summary-range .route-summary-range-icon {
         color: #94a3b8;
     }
+    .route-summary-speed {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-size: 0.9rem;
+        color: #64748b;
+    }
+    .route-summary-speed .route-summary-range-icon {
+        color: #94a3b8;
+    }
     .route-summary-placeholder {
         color: #94a3b8;
         font-size: 0.9rem;
@@ -414,8 +424,7 @@
                 routeData = routeDataResponse.locations;
                 displayRoute();
                 updateTimeline();
-                const km = routeDataResponse.total_distance_km ?? 0;
-                updateRouteSummary(km, startTime, endTime);
+                updateRouteSummary(routeDataResponse, startTime, endTime);
             } else {
                 showAlert('No route data found for the selected criteria.', 'info');
                 clearRoute();
@@ -434,15 +443,22 @@
         }
     }
 
-    function updateRouteSummary(km, startTimeVal, endTimeVal) {
+    function updateRouteSummary(routeDataResponse, startTimeVal, endTimeVal) {
         const el = document.getElementById('routeSummary');
         if (!el) return;
+        const km = routeDataResponse.total_distance_km ?? 0;
         const distanceLabel = (km != null && km !== '') ? `Distance: ${Number(km).toFixed(2)} km` : 'Distance: —';
         const startStr = (startTimeVal && startTimeVal.trim()) ? startTimeVal.trim() : '00:00';
         const endStr = (endTimeVal && endTimeVal.trim()) ? endTimeVal.trim() : '23:59';
         const rangeStr = (!startTimeVal && !endTimeVal) ? 'Full day (00:00 – 23:59)' : `Between ${startStr} and ${endStr}`;
+        const avgComputed = routeDataResponse.avg_speed_kmh_computed;
+        const avgDevice = routeDataResponse.avg_speed_kmh_device;
+        const speedComputedLabel = (avgComputed != null && !isNaN(avgComputed)) ? `Avg speed (computed): ${Number(avgComputed).toFixed(1)} km/h` : '';
+        const speedDeviceLabel = (avgDevice != null && !isNaN(avgDevice)) ? `Device: ${Number(avgDevice).toFixed(1)} km/h` : '';
+        const speedParts = [speedComputedLabel, speedDeviceLabel].filter(Boolean);
+        const speedHtml = speedParts.length ? '<span class="route-summary-speed"><i class="fas fa-tachometer-alt route-summary-range-icon"></i>' + speedParts.join(' · ') + '</span>' : '';
         el.innerHTML = '<span class="route-summary-distance"><span class="route-summary-icon"><i class="fas fa-route"></i></span>' + distanceLabel + '</span>' +
-            '<span class="route-summary-range"><i class="fas fa-clock route-summary-range-icon"></i>' + rangeStr + '</span>';
+            '<span class="route-summary-range"><i class="fas fa-clock route-summary-range-icon"></i>' + rangeStr + '</span>' + speedHtml;
     }
 
     function clearRouteSummary() {

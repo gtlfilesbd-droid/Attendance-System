@@ -16,9 +16,17 @@ class AppConfig {
   
   // Location Tracking Configuration
   static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)
-  /// Interval in seconds when duty is active (Start Duty). Location sent every N seconds.
-  /// Use 60–120 for better battery; lower values increase drain and heat.
+  /// Interval in seconds when duty is active (Start Duty). Used when moving slowly / standing.
+  /// Use 60–120 for better battery when walking or still.
   static const int locationUpdateIntervalSecondsWhenDuty = 60;
+  /// When moving fast (e.g. vehicle), send location more often for smoother route.
+  /// Speed threshold: if Position.speed >= [speedThresholdMovingMps] m/s, use this interval.
+  static const int locationUpdateIntervalSecondsWhenMoving = 15;
+  /// Speed above this (m/s) is treated as "moving" for adaptive interval. ~2 m/s ≈ 7.2 km/h.
+  static const double speedThresholdMovingMps = 2.0;
+  /// Send immediately when displacement from last sent position exceeds this (meters).
+  /// Reduces zigzag on map when driving; 30–50 m is a good range for vehicle.
+  static const double minDisplacementToSendMeters = 30.0;
   /// Interval in minutes to auto-refresh current location name on home screen.
   static const int placeNameRefreshMinutes = 15;
   static const double locationAccuracy = 10.0; // meters

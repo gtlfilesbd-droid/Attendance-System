@@ -183,41 +183,68 @@ class RouteHistorySerializer(serializers.Serializer):
                 'total_distance_meters': 0,
                 'total_distance_km': 0,
                 'duration_minutes': 0,
+                'avg_speed_kmh_computed': None,
+                'avg_speed_kmh_device': None,
             }
         
-        # Calculate total distance
+        # Optional: exclude very bad accuracy points from route (reduces zigzag from noisy GPS)
+        MAX_ACCURACY_METERS = 150.0
+        locations_list = list(locations)
+        filtered = [loc for loc in locations_list if getattr(loc, 'accuracy', None) is None or float(loc.accuracy) <= MAX_ACCURACY_METERS]
+        if len(filtered) >= 2:
+            locations_list = filtered
+        # Calculate total distance and per-segment distance/speed
+        # PostGIS Geography .distance() returns meters (no * 111320)
         total_distance = 0
-        previous_location = None
-        for location in locations:
-            if previous_location:
-                # Calculate distance between points
-                distance = previous_location.location.distance(location.location) * 111320  # Convert to meters
-                total_distance += distance
-            previous_location = location
-        
-        # Calculate duration
-        first_timestamp = locations.first().timestamp
-        last_timestamp = locations.last().timestamp
+        segment_distances = [None]  # first point has no segment from previous
+        segment_speeds = [None]  # speed in m/s for segment into this point
+
+        for i in range(1, len(locations_list)):
+            prev_loc = locations_list[i - 1]
+            curr_loc = locations_list[i]
+            dist_m = prev_loc.location.distance(curr_loc.location)
+            total_distance += dist_m
+            segment_distances.append(dist_m)
+            time_sec = (curr_loc.timestamp - prev_loc.timestamp).total_seconds()
+            speed_mps = (dist_m / time_sec) if time_sec > 0 else None
+            segment_speeds.append(speed_mps)
+
+        # Duration
+        first_timestamp = locations_list[0].timestamp
+        last_timestamp = locations_list[-1].timestamp
         duration = (last_timestamp - first_timestamp).total_seconds() / 60  # minutes
-        
+
+        # Average speeds for UI (computed = segment distance/time; device = from GPS)
+        speeds_computed = [s for s in segment_speeds if s is not None]
+        speeds_device = []
+        for loc in locations_list:
+            s = getattr(loc, 'speed', None)
+            if s is not None:
+                speeds_device.append(float(s))
+        avg_speed_kmh_computed = (
+            (sum(speeds_computed) / len(speeds_computed) * 3.6) if speeds_computed else None
+        )
+        avg_speed_kmh_device = (
+            (sum(speeds_device) / len(speeds_device) * 3.6) if speeds_device else None
+        )
+
         return {
             'employee': str(employee.id),
             'employee_name': employee.name,
             'employee_email': employee.email,
             'start_datetime': start_datetime,
             'end_datetime': end_datetime,
-            'total_locations': locations.count(),
+            'total_locations': len(locations_list),
             'first_location': {
-                'timestamp': locations.first().timestamp,
-                'latitude': locations.first().latitude,
-                'longitude': locations.first().longitude,
+                'timestamp': first_timestamp,
+                'latitude': locations_list[0].latitude,
+                'longitude': locations_list[0].longitude,
             },
             'last_location': {
-                'timestamp': locations.last().timestamp,
-                'latitude': locations.last().latitude,
-                'longitude': locations.last().longitude,
+                'timestamp': last_timestamp,
+                'latitude': locations_list[-1].latitude,
+                'longitude': locations_list[-1].longitude,
             },
-            # Plain list so app gets response.data['data']['locations'].length (not GeoJSON FeatureCollection)
             'locations': [
                 {
                     'id': loc.id,
@@ -228,10 +255,14 @@ class RouteHistorySerializer(serializers.Serializer):
                     'battery_level': loc.battery_level,
                     'speed': getattr(loc, 'speed', None),
                     'address': loc.address,
+                    'speed_computed': segment_speeds[j] if j < len(segment_speeds) else None,
+                    'segment_distance_meters': segment_distances[j] if j < len(segment_distances) else None,
                 }
-                for loc in locations
+                for j, loc in enumerate(locations_list)
             ],
             'total_distance_meters': round(total_distance, 2),
             'total_distance_km': round(total_distance / 1000, 2),
             'duration_minutes': round(duration, 2),
+            'avg_speed_kmh_computed': round(avg_speed_kmh_computed, 1) if avg_speed_kmh_computed is not None else None,
+            'avg_speed_kmh_device': round(avg_speed_kmh_device, 1) if avg_speed_kmh_device is not None else None,
         }

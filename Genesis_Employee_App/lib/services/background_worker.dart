@@ -132,10 +132,14 @@ class BackgroundWorker {
       });
     }
 
-    // Cached position from stream; used every 60s for send
+    // Cached position from stream; used for adaptive send
     Position? cachedPosition;
     StreamSubscription<Position>? positionSubscription;
     Timer? sendTimer;
+    // Track last sent position for displacement-based and adaptive-interval sending
+    double? lastSentLat;
+    double? lastSentLng;
+    DateTime? lastSentTime;
 
     service.on('stopService').listen((event) {
       positionSubscription?.cancel();
@@ -155,9 +159,10 @@ class BackgroundWorker {
       print('BackgroundWorker: Position stream error $e');
     });
 
-    // Timer every N seconds: send cached position or fallback to getCurrentPosition
+    // Adaptive send: check every 15s; send if displacement >= 30m OR time since last >= interval (15s when moving, 60s when still)
+    const int checkIntervalSeconds = 15;
     sendTimer = Timer.periodic(
-      const Duration(seconds: AppConfig.locationUpdateIntervalSecondsWhenDuty),
+      const Duration(seconds: checkIntervalSeconds),
       (timer) async {
         if (service is AndroidServiceInstance) {
           if (await service.isForegroundService()) {
@@ -174,8 +179,41 @@ class BackgroundWorker {
           position ??= await Geolocator.getCurrentPosition(
             desiredAccuracy: LocationAccuracy.high,
           );
-          await LocationService.sendLocationToBackend(position, battery);
-          await LocationService.syncOfflineData();
+          if (position == null) return;
+
+          final now = DateTime.now();
+          final bool neverSent = lastSentLat == null || lastSentLng == null || lastSentTime == null;
+          double displacementMeters = double.infinity;
+          if (!neverSent && lastSentLat != null && lastSentLng != null) {
+            final meters = Geolocator.distanceBetween(
+              lastSentLat!,
+              lastSentLng!,
+              position.latitude,
+              position.longitude,
+            );
+            displacementMeters = meters.toDouble();
+          }
+
+          // Speed in m/s (Position.speed is m/s). Use for adaptive interval.
+          final double speedMps = position.speed >= 0 ? position.speed : 0.0;
+          final int intervalSeconds = speedMps >= AppConfig.speedThresholdMovingMps
+              ? AppConfig.locationUpdateIntervalSecondsWhenMoving
+              : AppConfig.locationUpdateIntervalSecondsWhenDuty;
+          final int elapsed = lastSentTime != null
+              ? now.difference(lastSentTime!).inSeconds
+              : intervalSeconds + 1;
+
+          final bool shouldSend = neverSent ||
+              displacementMeters >= AppConfig.minDisplacementToSendMeters ||
+              elapsed >= intervalSeconds;
+
+          if (shouldSend) {
+            await LocationService.sendLocationToBackend(position, battery);
+            await LocationService.syncOfflineData();
+            lastSentLat = position.latitude;
+            lastSentLng = position.longitude;
+            lastSentTime = now;
+          }
         } catch (e) {
           print('BackgroundWorker: Error getting location $e');
         }
@@ -189,6 +227,9 @@ class BackgroundWorker {
       );
       cachedPosition = position;
       await LocationService.sendLocationToBackend(position, battery);
+      lastSentLat = position.latitude;
+      lastSentLng = position.longitude;
+      lastSentTime = DateTime.now();
     } catch (e) {
       print("BackgroundWorker: Initial location error $e");
     }
