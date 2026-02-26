@@ -100,7 +100,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen> {
   final AuthService _authService = AuthService();
   final LocationService _locationService = LocationService();
 
@@ -123,11 +123,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Network connectivity (connectivity_plus; does not guarantee internet reachability).
   bool _hasNetwork = true;
   bool _isRefreshingLocation = false;
+  /// Prevents double-tap / overlapping Start or End duty operations (re-entry guard).
+  bool _isDutyOperationInProgress = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     ForegroundRefreshService().addListener(_onForegroundRefresh);
     _loadData();
     PushNotificationService().registerFCMToken();
@@ -163,7 +164,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     ForegroundRefreshService().removeListener(_onForegroundRefresh);
-    WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _placeRefreshTimer?.cancel();
     super.dispose();
@@ -171,33 +171,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _onForegroundRefresh() {
     if (!mounted) return;
-    _loadData().then((_) {
+    _loadData().then((_) async {
       if (!mounted) return;
-      _loadTodayDutyTime();
-    });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.resumed) {
-      _onAppResumed();
-    }
-  }
-
-  Future<void> _onAppResumed() async {
-    await _checkServiceStatus();
-    if (!mounted) return;
-    // If we have open session but service was killed (e.g. by Android), restart tracking
-    if (!_isTracking && _dutyStartTime != null) {
-      await _locationService.startTracking();
+      await _loadTodayDutyTime();
+      if (!mounted) return;
       await _checkServiceStatus();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Tracking resumed')),
-        );
+      if (!mounted) return;
+      // If we have open session but service was killed (e.g. by Android), restart tracking (single place for resume handling)
+      if (!_isTracking && _dutyStartTime != null) {
+        await _locationService.startTracking();
+        await _checkServiceStatus();
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Tracking resumed')),
+          );
+        }
       }
-    }
+    });
   }
 
   void _startTimer() {
@@ -514,172 +504,202 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _toggleTracking() async {
+    if (_isDutyOperationInProgress) return;
+    _isDutyOperationInProgress = true;
+    if (mounted) setState(() {});
+
     final service = FlutterBackgroundService();
-    // Use duty state (open session) as source of truth for action, not just service.isRunning()
     final onDuty = _dutyStartTime != null;
     final isRunning = await service.isRunning();
 
-    if (onDuty) {
-      // End duty: show loading, get position, send to backend; only stop tracking if backend confirms success
-      if (mounted && context.mounted) {
-        _showDutyLoadingDialog(context, 'Ending duty...');
-      }
-      bool success = false;
-      bool hadException = false;
-      try {
-        await (() async {
-          final position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-          final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-          success = await ApiService().endDuty(
-            latitude: position.latitude,
-            longitude: position.longitude,
-            address: address,
-          );
-        }()).timeout(_dutyDialogTimeout);
-      } on TimeoutException {
+    bool dialogShown = false;
+    try {
+      if (onDuty) {
         if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Took too long. Check connection and try again.'),
-              backgroundColor: Colors.red,
-            ),
-          );
+          _showDutyLoadingDialog(context, 'Ending duty...');
+          dialogShown = true;
         }
-      } catch (e) {
-        success = false;
-        hadException = true;
-        if (mounted && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not end duty. Check connection and try again.'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-      if (success) {
-        await _locationService.stopTracking();
-        await LocationService.clearLastSentLocation();
-        if (mounted) {
-          setState(() {
-            _isTracking = false;
-            _dutyStartTime = null;
-          });
-          await _loadTodayDutyTime();
-          if (mounted) {
-            setState(() {
-              _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
-            });
-          }
-        }
-      } else if (!hadException && mounted && context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to end duty. Please try again.'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      if (mounted && context.mounted) {
-        Navigator.of(context).pop();
-      }
-    } else {
-      // Start duty: ensure location permission first
-      final hasLocation = await _locationService.requestLocationPermissionIfNeeded();
-      if (!hasLocation && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Location permission is required to start duty. Enable it in Settings.'),
-          ),
-        );
-        return;
-      }
-      if (await Permission.notification.isDenied) {
-        await Permission.notification.request();
-      }
-      if (mounted && context.mounted) {
-        _showDutyLoadingDialog(context, 'Starting duty...');
-      }
-      try {
-        await (() async {
-          Map<String, dynamic>? startData;
-          try {
-            final position = await Geolocator.getCurrentPosition(
-              desiredAccuracy: LocationAccuracy.high,
-            );
+        bool success = false;
+        bool hadException = false;
+        try {
+          await (() async {
+            final position = await _getPositionForDuty();
+            if (position == null) return;
             final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
-            final localDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
-            startData = await ApiService().startDuty(
+            success = await ApiService().endDuty(
               latitude: position.latitude,
               longitude: position.longitude,
               address: address,
-              date: localDateStr,
             );
-          } catch (_) {}
-          await _locationService.startTracking();
-          await Future.delayed(const Duration(seconds: 1));
-          final started = await service.isRunning();
-          if (mounted) {
-            DateTime? dutyStart;
-            if (started && startData != null) {
-              final startTimeStr = startData['start_time'] as String?;
-              if (startTimeStr != null && startTimeStr.isNotEmpty) {
-                try {
-                  final dt = DateTime.parse(startTimeStr);
-                  dutyStart = dt.isUtc ? dt.toLocal() : dt;
-                } catch (_) {}
-              }
-            }
-            if (dutyStart != null && dutyStart.isAfter(DateTime.now())) {
-              dutyStart = DateTime.now();
-            }
-            setState(() {
-              _isTracking = started;
-              _dutyStartTime = dutyStart;
-            });
-          }
-          if (!started && mounted) {
+          }()).timeout(_dutyDialogTimeout);
+        } on TimeoutException {
+          if (mounted && context.mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+              const SnackBar(
+                content: Text('Took too long. Check connection and try again.'),
+                backgroundColor: Colors.red,
+              ),
             );
-          } else if (started && mounted) {
-            if (startData == null && context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Duty started locally. Will sync when connected.'),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            }
-            final hasBackground = await _locationService.hasBackgroundLocationPermission();
-            if (!hasBackground && mounted && context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
-                  duration: Duration(seconds: 4),
-                ),
-              );
-            }
-            Future.delayed(const Duration(seconds: 2), () {
-              if (mounted) _fetchCurrentPlaceName();
-            });
           }
-        }()).timeout(_dutyDialogTimeout);
-      } on TimeoutException {
-        if (mounted && context.mounted) {
+        } catch (e) {
+          success = false;
+          hadException = true;
+          if (mounted && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not end duty. Check connection and try again.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+        if (success) {
+          await _locationService.stopTracking();
+          await LocationService.clearLastSentLocation();
+          if (mounted) {
+            setState(() {
+              _isTracking = false;
+              _dutyStartTime = null;
+            });
+            await _loadTodayDutyTime();
+            if (mounted) {
+              setState(() {
+                _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
+              });
+            }
+          }
+        } else if (!hadException && mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Took too long. Check connection and try again.'),
+              content: Text('Failed to end duty. Please try again.'),
               backgroundColor: Colors.red,
             ),
           );
         }
-      } finally {
-        if (mounted && context.mounted) {
-          Navigator.of(context).pop();
+      } else {
+        final hasLocation = await _locationService.requestLocationPermissionIfNeeded();
+        if (!hasLocation && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location permission is required to start duty. Enable it in Settings.'),
+            ),
+          );
+          return;
         }
+        if (await Permission.notification.isDenied) {
+          await Permission.notification.request();
+        }
+        if (mounted && context.mounted) {
+          _showDutyLoadingDialog(context, 'Starting duty...');
+          dialogShown = true;
+        }
+        try {
+          await (() async {
+            Map<String, dynamic>? startData;
+            final position = await _getPositionForDuty();
+            if (position == null) {
+              if (mounted && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Location unavailable. Try again.')),
+                );
+              }
+              return;
+            }
+            try {
+              final address = _currentPlaceName.isEmpty || _currentPlaceName == '—' ? null : _currentPlaceName;
+              final localDateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
+              startData = await ApiService().startDuty(
+                latitude: position.latitude,
+                longitude: position.longitude,
+                address: address,
+                date: localDateStr,
+              );
+            } catch (_) {}
+            await _locationService.startTracking();
+            await Future.delayed(const Duration(seconds: 1));
+            final started = await service.isRunning();
+            if (mounted) {
+              DateTime? dutyStart;
+              if (started && startData != null) {
+                final startTimeStr = startData['start_time'] as String?;
+                if (startTimeStr != null && startTimeStr.isNotEmpty) {
+                  try {
+                    final dt = DateTime.parse(startTimeStr);
+                    dutyStart = dt.isUtc ? dt.toLocal() : dt;
+                  } catch (_) {}
+                }
+              }
+              if (dutyStart != null && dutyStart.isAfter(DateTime.now())) {
+                dutyStart = DateTime.now();
+              }
+              setState(() {
+                _isTracking = started;
+                _dutyStartTime = dutyStart;
+              });
+            }
+            if (!started && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Could not start tracking. Check permissions.')),
+              );
+            } else if (started && mounted) {
+              if (startData == null && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Duty started locally. Will sync when connected.'),
+                    backgroundColor: Colors.orange,
+                  ),
+                );
+              }
+              final hasBackground = await _locationService.hasBackgroundLocationPermission();
+              if (!hasBackground && mounted && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),
+                    duration: Duration(seconds: 4),
+                  ),
+                );
+              }
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) _fetchCurrentPlaceName();
+              });
+            }
+          }()).timeout(_dutyDialogTimeout);
+        } on TimeoutException {
+          if (mounted && context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Took too long. Check connection and try again.'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
+    } finally {
+      if (dialogShown && mounted && context.mounted) {
+        Navigator.of(context).pop();
+      }
+      if (mounted) {
+        setState(() => _isDutyOperationInProgress = false);
+      }
+    }
+  }
+
+  /// Gets current position with 15s timeout; retries once with lower accuracy. Returns null on failure.
+  static const Duration _positionTimeout = Duration(seconds: 15);
+
+  Future<Position?> _getPositionForDuty() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(_positionTimeout);
+    } on TimeoutException {
+      try {
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+        ).timeout(_positionTimeout);
+      } on TimeoutException {
+        return null;
       }
     }
   }
@@ -963,7 +983,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _toggleTracking,
+                onPressed: _isDutyOperationInProgress ? null : _toggleTracking,
                 icon: Icon(_dutyStartTime != null ? Icons.stop_circle : Icons.play_circle_filled, size: 22),
                 label: Text(
                   _dutyStartTime != null ? 'END DUTY' : 'START DUTY',

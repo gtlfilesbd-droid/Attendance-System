@@ -83,8 +83,15 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      ForegroundRefreshService().notifyAppPaused();
+    }
     if (state == AppLifecycleState.resumed) {
-      _handleResumed();
+      // Run resume work after first frame so UI paints and responds first (avoids hang after long background).
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleResumed();
+      });
     }
   }
 

@@ -270,6 +270,7 @@ class LocationService {
       final stopAt = DateTime.now().add(maxSyncDuration);
       final List<String> remainingData = [];
       int processed = 0;
+      const int chunkSize = 8;
 
       for (int i = 0; i < offlineData.length; i++) {
         if (DateTime.now().isAfter(stopAt) || processed >= maxPointsPerSyncRun) {
@@ -312,6 +313,10 @@ class LocationService {
           }
         } catch (e) {
           remainingData.add(jsonStr);
+        }
+        // Yield to event loop every chunk so UI (scroll, refresh) stays responsive.
+        if ((i + 1) % chunkSize == 0) {
+          await Future.delayed(Duration.zero);
         }
       }
 

@@ -59,6 +59,8 @@ See **[docs/BUILD_AND_RELEASE.md](docs/BUILD_AND_RELEASE.md)** for signing setup
 - **All tests (including integration):** `flutter test`
 - **Integration tests on device:** `flutter test integration_test/`
 
+**Android 10+ and long background:** To verify stability after long background (e.g. 30+ minutes), test on Android 10, 11, 12, 13, 14: put the app in background (no duty, Start Duty visible), wait 30+ minutes, then bring to foreground — scroll, pull-to-refresh, and Start Duty should respond. Optionally enable "Don't keep activities" in Developer options to stress activity restore.
+
 See [test/TEST_SCENARIOS.md](test/TEST_SCENARIOS.md) for scenario descriptions and app kill/restart steps.
 
 ## Build

@@ -23,9 +23,21 @@ class ForegroundRefreshService {
   ForegroundRefreshService._internal();
 
   DateTime? _lastRefreshAt;
+  /// When app last went to background (paused/inactive); used to detect long background.
+  DateTime? _lastPausedAt;
   static const Duration debounceDuration = Duration(seconds: 30);
+  static const Duration _listenerDelay = Duration(milliseconds: 500);
+  static const Duration _listenerDelayLongBackground = Duration(milliseconds: 800);
+  static const Duration longBackgroundThreshold = Duration(minutes: 5);
+  /// Delay before starting sync when long background + pending offline data (so first paint/tap are not blocked).
+  static const Duration deferredSyncDelay = Duration(seconds: 3);
   final List<VoidCallback> _listeners = [];
   bool _refreshing = false;
+
+  /// Call when app goes to background (paused or inactive). Used to detect long background on resume.
+  void notifyAppPaused() {
+    _lastPausedAt = DateTime.now();
+  }
 
   /// Registers a callback to run when a foreground refresh completes.
   /// Call from screen initState; callback should check [mounted] before setState.
@@ -71,17 +83,38 @@ class ForegroundRefreshService {
     _refreshing = true;
     try {
       ApiService().initialize();
-      // Do not await: sync can take up to 90s; run in background so UI and listeners are not blocked.
-      unawaited(LocationService.syncOfflineData());
+
+      final backgroundDuration = _lastPausedAt != null
+          ? now.difference(_lastPausedAt!)
+          : Duration.zero;
+      final isLongBackground = backgroundDuration > longBackgroundThreshold;
+      final listenerDelay = isLongBackground
+          ? _listenerDelayLongBackground
+          : _listenerDelay;
+
+      // Long background: skip immediate sync to avoid overloading UI; if pending offline data (e.g. from duty), sync after delay.
+      if (!isLongBackground) {
+        unawaited(LocationService.syncOfflineData());
+      } else {
+        unawaited((() async {
+          if (await LocationService.hasPendingOfflineData()) {
+            await Future.delayed(deferredSyncDelay);
+            await LocationService.syncOfflineData();
+          }
+        })());
+      }
       _lastRefreshAt = now;
 
-      for (final listener in List<VoidCallback>.from(_listeners)) {
-        try {
-          listener();
-        } catch (_) {
-          // Ignore listener errors so one screen does not break others
+      // Defer listener notification so first tap/scroll after resume is processed (Uber/Grab-style).
+      unawaited(Future.delayed(listenerDelay, () {
+        for (final listener in List<VoidCallback>.from(_listeners)) {
+          try {
+            listener();
+          } catch (_) {
+            // Ignore listener errors so one screen does not break others
+          }
         }
-      }
+      }));
 
       return ForegroundRefreshResult.refreshed;
     } finally {
