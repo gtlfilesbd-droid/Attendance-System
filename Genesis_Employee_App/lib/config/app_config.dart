@@ -8,6 +8,8 @@ class AppConfig {
   static const String logoutEndpoint = '/employees/auth/logout/';
   static const String tokenRefreshEndpoint = '/auth/token/refresh/';
   static const String locationLogEndpoint = '/tracking/log-location/';
+  static const String locationLogBulkEndpoint = '/tracking/log-location/bulk/';
+  static const String heartbeatEndpoint = '/tracking/heartbeat/';
   static const String myAttendanceEndpoint = '/attendance/my-attendance/';
   static const String startDutyEndpoint = '/attendance/start-duty/';
   static const String endDutyEndpoint = '/attendance/end-duty/';

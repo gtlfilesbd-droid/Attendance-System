@@ -140,6 +140,7 @@ class BackgroundWorker {
     double? lastSentLat;
     double? lastSentLng;
     DateTime? lastSentTime;
+    DateTime? lastHeartbeatTime;
 
     service.on('stopService').listen((event) {
       positionSubscription?.cancel();
@@ -213,6 +214,23 @@ class BackgroundWorker {
             lastSentLat = position.latitude;
             lastSentLng = position.longitude;
             lastSentTime = now;
+          }
+
+          // Heartbeat every 15 min for last_seen / offline detection
+          final needHeartbeat = lastHeartbeatTime == null ||
+              now.difference(lastHeartbeatTime!).inMinutes >= 15;
+          if (needHeartbeat) {
+            try {
+              final bat = await battery.batteryLevel;
+              final sent = await ApiService().sendHeartbeat(
+                appVersion: AppConfig.appVersion,
+                batteryLevel: bat,
+                isTrackingEnabled: true,
+                latestLocationTimestamp: lastSentTime?.toIso8601String(),
+                deviceOs: 'Android',
+              );
+              if (sent) lastHeartbeatTime = now;
+            } catch (_) {}
           }
         } catch (e) {
           print('BackgroundWorker: Error getting location $e');

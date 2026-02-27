@@ -14,7 +14,7 @@ import logging
 import uuid
 from rest_framework import authentication
 from rest_framework import exceptions
-from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError, ExpiredTokenError
 from django.conf import settings
 
 from .models import Employee
@@ -46,6 +46,17 @@ class EmployeeJWTAuthentication(authentication.BaseAuthentication):
 
         try:
             validated_token = self.get_validated_token(raw_token)
+        except ExpiredTokenError:
+            # Access token is structurally valid but expired -> return 401 with a clear JSON error.
+            logger.info("Employee JWT auth: token expired")
+            raise exceptions.AuthenticationFailed(
+                detail={'code': 'token_expired', 'detail': 'Access token has expired.'}
+            )
+        except TokenError:
+            # Any other token error (invalid signature, malformed, etc.) – fall through so the next
+            # authentication backend (JWTAuthentication or Session) can try.
+            logger.debug("Employee JWT auth: skip reason=token_error")
+            return None
         except InvalidToken:
             logger.debug("Employee JWT auth: skip reason=invalid_token")
             return None

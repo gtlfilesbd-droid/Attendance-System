@@ -50,10 +50,16 @@ class ApiService {
     // Add interceptors
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
-        // Add Auth Token
-        final token = await AuthService().getToken();
-        if (token != null) {
-          options.headers['Authorization'] = 'Bearer $token';
+        // Skip auth header for public/auth endpoints
+        final path = options.path;
+        final isAuthPath = path.contains('/auth/token/') || path.contains('/employees/auth/login/');
+
+        if (!isAuthPath) {
+          // Add Auth Token
+          final token = await AuthService().getToken();
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
         }
         
         // Logging in debug mode
@@ -77,9 +83,14 @@ class ApiService {
           print('API Error: [${e.response?.statusCode}] ${e.message}');
           print('Response: ${e.response?.data}');
         }
-        
-        // Handle 401 Unauthorized (Token expired)
-        if (e.response?.statusCode == 401) {
+
+        final path = e.requestOptions.path;
+        final isAuthPath = path.contains('/auth/token/') ||
+            path.contains('/employees/auth/login/') ||
+            path.contains('/employees/auth/logout/');
+
+        // Only handle 401 for non-auth endpoints to avoid infinite loops.
+        if (e.response?.statusCode == 401 && !isAuthPath) {
           try {
             // Attempt to refresh the token
             final authService = AuthService();
@@ -255,6 +266,70 @@ class ApiService {
     } catch (e, stackTrace) {
       print('API: logLocation error: $e');
       print('API: logLocation stackTrace: $stackTrace');
+      return false;
+    }
+  }
+
+  /// Bulk log locations (offline sync). POST /tracking/log-location/bulk/
+  /// [locations] list of maps with latitude, longitude, timestamp, accuracy, battery_level, optional speed.
+  /// Returns number of successfully created, or -1 on failure.
+  Future<int> logLocationBulk(List<Map<String, dynamic>> locations) async {
+    if (locations.isEmpty) return 0;
+    try {
+      ApiService().initialize();
+      final employeeData = await AuthService().getEmployeeData();
+      final employeeId = employeeData?['id']?.toString();
+      final List<Map<String, dynamic>> payloads = [];
+      for (final loc in locations) {
+        final m = Map<String, dynamic>.from(loc);
+        if (employeeId != null && !m.containsKey('employee')) m['employee'] = employeeId;
+        if (!m.containsKey('timestamp')) m['timestamp'] = DateTime.now().toIso8601String();
+        payloads.add(m);
+      }
+      final response = await _dio.post(
+        AppConfig.locationLogBulkEndpoint,
+        data: {'locations': payloads},
+      );
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = response.data;
+        if (data is Map && data['success'] == true) {
+          final created = data['created'];
+          return created is int ? created : 0;
+        }
+      }
+      return -1;
+    } on DioException catch (e) {
+      if (kDebugMode) print('API: logLocationBulk error: ${e.message}');
+      return -1;
+    } catch (e) {
+      if (kDebugMode) print('API: logLocationBulk error: $e');
+      return -1;
+    }
+  }
+
+  /// Heartbeat for last_seen / offline detection. POST /tracking/heartbeat/
+  Future<bool> sendHeartbeat({
+    String? deviceId,
+    String? appVersion,
+    int? batteryLevel,
+    bool? isTrackingEnabled,
+    String? latestLocationTimestamp,
+    String? deviceOs,
+  }) async {
+    try {
+      ApiService().initialize();
+      final payload = <String, dynamic>{};
+      if (deviceId != null) payload['device_id'] = deviceId;
+      if (appVersion != null) payload['app_version'] = appVersion;
+      if (batteryLevel != null) payload['battery_level'] = batteryLevel;
+      if (isTrackingEnabled != null) payload['is_tracking_enabled'] = isTrackingEnabled;
+      if (latestLocationTimestamp != null) payload['latest_location_timestamp'] = latestLocationTimestamp;
+      if (deviceOs != null) payload['device_os'] = deviceOs;
+      final response = await _dio.post(AppConfig.heartbeatEndpoint, data: payload);
+      return response.statusCode == 200;
+    } on DioException catch (_) {
+      return false;
+    } catch (_) {
       return false;
     }
   }

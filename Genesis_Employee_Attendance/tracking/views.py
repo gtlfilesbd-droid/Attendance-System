@@ -293,6 +293,113 @@ def log_location(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def heartbeat(request):
+    """
+    Heartbeat for last_seen and offline detection.
+    POST /api/tracking/heartbeat/
+    Body: { "device_id": "...", "app_version": "...", "battery_level": 87,
+            "is_tracking_enabled": true, "latest_location_timestamp": "2024-01-15T10:30:00Z" }
+    """
+    from employees.models import Employee
+
+    user = request.user
+    if not isinstance(user, Employee):
+        return Response(
+            {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    now = timezone.now()
+    data = request.data or {}
+    update_fields = ['last_seen_at', 'last_heartbeat_at']
+    user.last_seen_at = now
+    user.last_heartbeat_at = now
+
+    latest_ts = data.get('latest_location_timestamp')
+    if latest_ts:
+        try:
+            ts_str = latest_ts.replace('Z', '+00:00')
+            user.last_location_at = datetime.fromisoformat(ts_str)
+            if user.last_location_at.tzinfo is None:
+                user.last_location_at = timezone.make_aware(user.last_location_at)
+            update_fields.append('last_location_at')
+        except Exception:
+            pass
+    device_os = data.get('device_os') or data.get('device_id')
+    if device_os:
+        user.last_device_os = str(device_os)[:50]
+        update_fields.append('last_device_os')
+
+    user.save(update_fields=update_fields)
+    return Response({'success': True}, status=status.HTTP_200_OK)
+
+
+def _log_location_single(employee, data):
+    """Validate and save one location payload; used by log_location and log_location_bulk."""
+    payload = data.copy()
+    if 'employee' not in payload or not payload['employee']:
+        payload['employee'] = str(employee.id)
+    serializer = LocationCreateSerializer(data=payload)
+    if not serializer.is_valid():
+        return None, serializer.errors
+    location_log = serializer.save()
+    if not (location_log.address and location_log.address.strip()):
+        addr = get_display_address(location_log.latitude, location_log.longitude)
+        if addr and not _is_coordinates_only(addr):
+            location_log.address = addr
+            location_log.save(update_fields=['address'])
+    return location_log, None
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def log_location_bulk(request):
+    """
+    Bulk log locations (offline sync). POST /api/tracking/log-location/bulk/
+    Body: { "locations": [ { "latitude", "longitude", "timestamp", "accuracy", "battery_level", "speed?" }, ... ] }
+    Max 200 per request.
+    """
+    from employees.models import Employee
+
+    user = request.user
+    if not isinstance(user, Employee):
+        return Response(
+            {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    raw = request.data or {}
+    locations = raw.get('locations') if isinstance(raw.get('locations'), list) else []
+    if len(locations) > 200:
+        locations = locations[:200]
+    if not locations:
+        return Response(
+            {'success': False, 'message': 'locations array is required (max 200).'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    created = []
+    errors = []
+    for idx, item in enumerate(locations):
+        payload = dict(item)
+        if 'employee' not in payload or not payload['employee']:
+            payload['employee'] = str(user.id)
+        loc, err = _log_location_single(user, payload)
+        if err:
+            errors.append({'index': idx, 'errors': err})
+        else:
+            created.append(loc.id)
+
+    return Response({
+        'success': True,
+        'created': len(created),
+        'ids': created,
+        'errors': errors if errors else None,
+    }, status=status.HTTP_201_CREATED)
+
+
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def live_locations(request):

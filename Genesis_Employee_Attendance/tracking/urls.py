@@ -1,7 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
-    log_location, live_locations, latest_location, employee_route, my_route_today,
+    log_location, log_location_bulk, heartbeat,
+    live_locations, latest_location, employee_route, my_route_today,
     resolve_address, LocationLogViewSet
 )
 
@@ -11,6 +12,8 @@ router.register(r'location-logs', LocationLogViewSet, basename='location-log')
 urlpatterns = [
     # Location tracking endpoints
     path('log-location/', log_location, name='log-location'),
+    path('log-location/bulk/', log_location_bulk, name='log-location-bulk'),
+    path('heartbeat/', heartbeat, name='heartbeat'),
     path('live-locations/', live_locations, name='live-locations'),
     path('latest-location/', latest_location, name='latest-location'),
     path('resolve-address/', resolve_address, name='resolve-address'),

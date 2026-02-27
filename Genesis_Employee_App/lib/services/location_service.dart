@@ -259,6 +259,9 @@ class LocationService {
     }
   }
 
+  static const int _bulkThreshold = 5;
+  static const int _bulkMaxPerRequest = 200;
+
   static Future<void> syncOfflineData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -268,34 +271,61 @@ class LocationService {
 
       print("FLUTTER_BG_SERVICE: Syncing ${offlineData.length} offline records...");
       final stopAt = DateTime.now().add(maxSyncDuration);
-      final List<String> remainingData = [];
+      List<String> remainingData = List<String>.from(offlineData);
+
+      if (remainingData.length >= _bulkThreshold) {
+        final batchSize = remainingData.length.clamp(0, _bulkMaxPerRequest).clamp(0, maxPointsPerSyncRun);
+        final batch = remainingData.take(batchSize).toList();
+        final List<Map<String, dynamic>> payloads = [];
+        for (final jsonStr in batch) {
+          try {
+            final data = jsonDecode(jsonStr) as Map<String, dynamic>;
+            final lat = data['latitude'];
+            final lng = data['longitude'];
+            final acc = data['accuracy'];
+            final bat = data['battery_level'];
+            if (lat == null || lng == null || acc == null || bat == null) continue;
+            final accuracy = (acc is num) ? acc.toDouble() : null;
+            final batteryLevel = (bat is int) ? bat : (bat is num ? (bat as num).toInt() : null);
+            if (accuracy == null || batteryLevel == null) continue;
+            payloads.add({
+              'latitude': (lat is num) ? lat.toDouble() : 0.0,
+              'longitude': (lng is num) ? lng.toDouble() : 0.0,
+              'accuracy': accuracy,
+              'battery_level': batteryLevel,
+              'speed': data['speed'] is num ? (data['speed'] as num).toDouble() : null,
+              'timestamp': data['timestamp'] is String ? data['timestamp'] as String : DateTime.now().toIso8601String(),
+            });
+          } catch (_) {}
+        }
+        final created = payloads.isEmpty ? 0 : await ApiService().logLocationBulk(payloads);
+        if (created > 0) {
+          final rest = remainingData.sublist(batch.length);
+          final failedInBatch = batch.sublist(created > batch.length ? batch.length : created);
+          remainingData = failedInBatch + rest;
+          await prefs.setStringList('offline_locations', remainingData);
+          print("FLUTTER_BG_SERVICE: Bulk sync created $created. Remaining: ${remainingData.length}");
+        }
+        return;
+      }
+
       int processed = 0;
       const int chunkSize = 8;
-
-      for (int i = 0; i < offlineData.length; i++) {
-        if (DateTime.now().isAfter(stopAt) || processed >= maxPointsPerSyncRun) {
-          remainingData.addAll(offlineData.sublist(i));
-          break;
-        }
-        final String jsonStr = offlineData[i];
+      for (int i = 0; i < remainingData.length; i++) {
+        if (DateTime.now().isAfter(stopAt) || processed >= maxPointsPerSyncRun) break;
+        final String jsonStr = remainingData[i];
         try {
           final data = jsonDecode(jsonStr) as Map<String, dynamic>;
           final lat = data['latitude'];
           final lng = data['longitude'];
           final acc = data['accuracy'];
           final bat = data['battery_level'];
-          if (lat == null || lng == null || acc == null || bat == null) {
-            remainingData.add(jsonStr);
-            continue;
-          }
+          if (lat == null || lng == null || acc == null || bat == null) continue;
           final latitude = (lat is num) ? lat.toDouble() : null;
           final longitude = (lng is num) ? lng.toDouble() : null;
           final accuracy = (acc is num) ? acc.toDouble() : null;
-          final batteryLevel = (bat is int) ? bat : (bat is num ? bat.toInt() : null);
-          if (latitude == null || longitude == null || accuracy == null || batteryLevel == null) {
-            remainingData.add(jsonStr);
-            continue;
-          }
+          final batteryLevel = (bat is int) ? bat : (bat is num ? (bat as num).toInt() : null);
+          if (latitude == null || longitude == null || accuracy == null || batteryLevel == null) continue;
           final speed = data['speed'] is num ? (data['speed'] as num).toDouble() : null;
           final timestamp = data['timestamp'] is String ? data['timestamp'] as String? : null;
           final success = await ApiService().logLocation(
@@ -306,24 +336,18 @@ class LocationService {
             speed: speed,
             timestamp: timestamp,
           );
-          if (!success) {
-            remainingData.add(jsonStr);
-          } else {
+          if (success) {
+            remainingData.removeAt(i);
             processed++;
+            i--;
           }
-        } catch (e) {
-          remainingData.add(jsonStr);
-        }
-        // Yield to event loop every chunk so UI (scroll, refresh) stays responsive.
-        if ((i + 1) % chunkSize == 0) {
-          await Future.delayed(Duration.zero);
-        }
+        } catch (_) {}
+        if ((i + 1) % chunkSize == 0) await Future.delayed(Duration.zero);
       }
 
-      final toStore = remainingData;
-      if (toStore.length != offlineData.length || toStore.isNotEmpty) {
-        await prefs.setStringList('offline_locations', toStore);
-        print("FLUTTER_BG_SERVICE: Sync run done. Remaining: ${toStore.length}");
+      if (remainingData.length != offlineData.length || remainingData.isNotEmpty) {
+        await prefs.setStringList('offline_locations', remainingData);
+        print("FLUTTER_BG_SERVICE: Sync run done. Remaining: ${remainingData.length}");
       }
     } catch (e) {
       print("FLUTTER_BG_SERVICE: Error syncing $e");

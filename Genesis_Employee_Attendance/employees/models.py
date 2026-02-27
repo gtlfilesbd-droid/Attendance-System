@@ -83,6 +83,13 @@ class Employee(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    # Monitoring & offline detection (plan: last_seen, heartbeat)
+    last_seen_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_location_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_device_os = models.CharField(max_length=50, null=True, blank=True)
+    battery_opt_out = models.BooleanField(default=False, help_text='User requested battery optimization exemption')
     
     class Meta:
         db_table = 'employees'
