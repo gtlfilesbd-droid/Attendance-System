@@ -17,6 +17,7 @@ from .models import LocationLog
 from .serializers import (
     LocationLogSerializer, LocationCreateSerializer, RouteHistorySerializer
 )
+from config.circuit_breakers import with_circuit
 
 # Dashboard (template) views
 from django.contrib.auth.decorators import login_required
@@ -64,16 +65,17 @@ def _reverse_geocode(lat, lon):
     if lat is None or lon is None:
         return None
     try:
-        url = 'https://nominatim.openstreetmap.org/reverse?' + urllib.parse.urlencode({
-            'lat': lat,
-            'lon': lon,
-            'format': 'jsonv2',
-            'addressdetails': 1,
-            'zoom': 18,
-        })
-        req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
+        def _call():
+            url = 'https://nominatim.openstreetmap.org/reverse?' + urllib.parse.urlencode({
+                'lat': lat,
+                'lon': lon,
+                'format': 'jsonv2',
+                'addressdetails': 1,
+                'zoom': 18,
+            })
+            req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
             addr = data.get('address')
             if isinstance(addr, dict):
                 parts = []
@@ -89,6 +91,9 @@ def _reverse_geocode(lat, lon):
             name = data.get('display_name')
             if name and isinstance(name, str):
                 return name.strip()[:500]
+            return None
+
+        return with_circuit('nominatim', _call)
     except Exception as e:
         logger.debug('reverse_geocode failed: %s', e)
     return None
@@ -102,33 +107,36 @@ def _reverse_geocode_photon(lat, lon):
     if lat is None or lon is None:
         return None
     try:
-        url = 'https://photon.komoot.io/reverse?' + urllib.parse.urlencode({
-            'lon': lon,
-            'lat': lat,
-        })
-        req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
-        features = data.get('features') if isinstance(data, dict) else None
-        if not features or not isinstance(features, list):
-            return None
-        props = features[0].get('properties') if features and isinstance(features[0], dict) else None
-        if not props or not isinstance(props, dict):
-            return None
-        parts = []
-        for key in (
-            'housenumber', 'street', 'name', 'district', 'suburb', 'locality',
-            'city', 'county', 'state', 'postcode', 'country'
-        ):
-            val = props.get(key)
-            if val and isinstance(val, str) and val.strip():
-                v = val.strip()
-                if v not in parts:
-                    parts.append(v)
-        if not parts:
-            return None
-        result = ', '.join(parts).strip()
-        return result[:500] if result else None
+        def _call():
+            url = 'https://photon.komoot.io/reverse?' + urllib.parse.urlencode({
+                'lon': lon,
+                'lat': lat,
+            })
+            req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+            features = data.get('features') if isinstance(data, dict) else None
+            if not features or not isinstance(features, list):
+                return None
+            props = features[0].get('properties') if features and isinstance(features[0], dict) else None
+            if not props or not isinstance(props, dict):
+                return None
+            parts = []
+            for key in (
+                'housenumber', 'street', 'name', 'district', 'suburb', 'locality',
+                'city', 'county', 'state', 'postcode', 'country'
+            ):
+                val = props.get(key)
+                if val and isinstance(val, str) and val.strip():
+                    v = val.strip()
+                    if v not in parts:
+                        parts.append(v)
+            if not parts:
+                return None
+            result = ', '.join(parts).strip()
+            return result[:500] if result else None
+
+        return with_circuit('photon', _call)
     except Exception as e:
         logger.debug('reverse_geocode_photon failed: %s', e)
     return None

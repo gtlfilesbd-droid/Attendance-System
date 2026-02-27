@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -285,6 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// Ignores stale completions when multiple calls overlap (e.g. date change at midnight).
   Future<void> _loadTodayDutyTime() async {
     final gen = ++_loadTodayDutyTimeGeneration;
+    final sw = Stopwatch()..start();
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
@@ -326,6 +328,12 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
     if (gen != _loadTodayDutyTimeGeneration) return;
+    sw.stop();
+    if (kDebugMode) {
+      // Debug-only perf log
+      // ignore: avoid_print
+      print('HOME: _loadTodayDutyTime completed in ${sw.elapsedMilliseconds}ms');
+    }
     setState(() {
       _dutyTimeLoadError = loadError;
       if (loadError != null) {

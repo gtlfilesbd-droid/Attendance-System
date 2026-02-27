@@ -20,7 +20,10 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-this-in-produc
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config('DEBUG', default=True, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+_allowed = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=Csv())
+if 'web' not in _allowed:  # for Locust/load test from inside Docker (Host: web:8000)
+    _allowed = list(_allowed) + ['web']
+ALLOWED_HOSTS = _allowed
 
 # Required for admin/login when accessed via public IP or port-forward (Django 4.0+)
 CSRF_TRUSTED_ORIGINS = config(
@@ -64,6 +67,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'config.middleware.performance.PerformanceLoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -359,6 +363,13 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'tracking.send_duty_reminder_notification',
         'schedule': crontab(minute=28, hour=9, day_of_week='0-4,6'),
         'args': ('late',),
+    },
+    'detect-location-anomalies-nightly': {
+        'task': 'tracking.detect_location_anomalies',
+        'schedule': crontab(hour=2, minute=0),
+        'options': {
+            'expires': 3600,
+        },
     },
 }
 

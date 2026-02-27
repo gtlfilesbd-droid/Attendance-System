@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.gis.admin import OSMGeoAdmin
 from django.utils import timezone
 from config.admin_export import AdminExportMixin
-from .models import LocationLog
+from .models import LocationLog, LocationAnomaly
 from attendance.admin_filters import format_time_12h
 
 
@@ -48,3 +48,11 @@ class LocationLogAdmin(AdminExportMixin, OSMGeoAdmin):
         return format_time_12h(timezone.localtime(obj.timestamp) if obj.timestamp else None)
     formatted_timestamp.short_description = 'Timestamp'
     formatted_timestamp.admin_order_field = 'timestamp'
+
+
+@admin.register(LocationAnomaly)
+class LocationAnomalyAdmin(AdminExportMixin, admin.ModelAdmin):
+    list_display = ['id', 'employee', 'date', 'reason', 'score', 'created_at']
+    list_filter = ['reason', 'date', 'employee']
+    search_fields = ['employee__employee_id', 'employee__name', 'employee__email']
+    ordering = ['-date', '-created_at']

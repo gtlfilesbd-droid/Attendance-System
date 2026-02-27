@@ -6,6 +6,7 @@ from django.utils import timezone
 from django.db.models import Min, Max, Count, Sum
 from datetime import datetime, timedelta, time
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +149,165 @@ def calculate_daily_attendance():
     
     logger.info(f"Daily attendance calculation completed: {summary}")
     
+    return summary
+
+
+@shared_task(name='tracking.detect_location_anomalies')
+def detect_location_anomalies():
+    """
+    Scan recent LocationLog entries and record anomalies into LocationAnomaly.
+    Rules (initial):
+    - High speed: > 150 km/h between two consecutive points.
+    - Long jump: > 20 km within <= 5 minutes.
+    - Night activity: movement between 00:00–05:00 with distance > 1 km.
+    """
+    from employees.models import Employee
+    from tracking.models import LocationLog, LocationAnomaly
+    from django.contrib.gis.geos import Point
+    from django.db import transaction
+
+    start_time = timezone.now()
+    logger.info("detect_location_anomalies: starting scan")
+
+    now = start_time
+    today = now.date()
+    # Look back 1 day plus today to avoid gaps around midnight
+    start_date = today - timedelta(days=1)
+
+    qs = LocationLog.objects.filter(timestamp__date__gte=start_date).select_related('employee').order_by('employee_id', 'timestamp')
+    if not qs.exists():
+        logger.info("detect_location_anomalies: no location logs in range")
+        return {'status': 'ok', 'employees': 0, 'anomalies_created': 0}
+
+    anomalies_created = 0
+    current_emp_id = None
+    previous = None
+    high_speed_reasons = {}
+    long_jump_reasons = {}
+    night_activity_reasons = {}
+
+    def _km_between(p1: Point, p2: Point) -> float:
+        """
+        Approximate great-circle distance in km using haversine.
+        """
+        lat1 = math.radians(p1.y)
+        lon1 = math.radians(p1.x)
+        lat2 = math.radians(p2.y)
+        lon2 = math.radians(p2.x)
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return 6371.0 * c  # Earth radius ~6371 km
+
+    def _add_reason(store: dict, emp, date, key, value):
+        d = store.setdefault((emp.id, date), {})
+        d.setdefault(key, []).append(value)
+
+    for loc in qs:
+        emp = loc.employee
+        if current_emp_id is None or emp.id != current_emp_id:
+            previous = None
+            current_emp_id = emp.id
+        if previous is not None:
+            dt = (loc.timestamp - previous.timestamp).total_seconds()
+            if dt > 0:
+                km = _km_between(previous.location, loc.location)
+                speed_kmh = km / (dt / 3600.0) if dt > 0 else 0.0
+                # High speed
+                if speed_kmh > 150:
+                    _add_reason(
+                        high_speed_reasons,
+                        emp,
+                        loc.timestamp.date(),
+                        'segments',
+                        {
+                            'from': previous.timestamp.isoformat(),
+                            'to': loc.timestamp.isoformat(),
+                            'km': round(km, 3),
+                            'speed_kmh': round(speed_kmh, 1),
+                        },
+                    )
+                # Long jump in short time
+                if km > 20 and dt <= 5 * 60:
+                    _add_reason(
+                        long_jump_reasons,
+                        emp,
+                        loc.timestamp.date(),
+                        'jumps',
+                        {
+                            'from': previous.timestamp.isoformat(),
+                            'to': loc.timestamp.isoformat(),
+                            'km': round(km, 3),
+                            'seconds': int(dt),
+                        },
+                    )
+        # Night activity
+        local_ts = timezone.localtime(loc.timestamp)
+        if 0 <= local_ts.hour < 5:
+            _add_reason(
+                night_activity_reasons,
+                emp,
+                loc.timestamp.date(),
+                'points',
+                {
+                    'time': local_ts.isoformat(),
+                    'lat': loc.latitude,
+                    'lng': loc.longitude,
+                },
+            )
+        previous = loc
+
+    with transaction.atomic():
+        for (emp_id, d), payload in high_speed_reasons.items():
+            emp = Employee.objects.get(id=emp_id)
+            obj, created = LocationAnomaly.objects.update_or_create(
+                employee=emp,
+                date=d,
+                reason=LocationAnomaly.REASON_HIGH_SPEED,
+                defaults={
+                    'score': max(1.0, len(payload.get('segments', []))),
+                    'details': payload,
+                },
+            )
+            if created:
+                anomalies_created += 1
+
+        for (emp_id, d), payload in long_jump_reasons.items():
+            emp = Employee.objects.get(id=emp_id)
+            obj, created = LocationAnomaly.objects.update_or_create(
+                employee=emp,
+                date=d,
+                reason=LocationAnomaly.REASON_LONG_JUMP,
+                defaults={
+                    'score': max(1.0, len(payload.get('jumps', []))),
+                    'details': payload,
+                },
+            )
+            if created:
+                anomalies_created += 1
+
+        for (emp_id, d), payload in night_activity_reasons.items():
+            emp = Employee.objects.get(id=emp_id)
+            obj, created = LocationAnomaly.objects.update_or_create(
+                employee=emp,
+                date=d,
+                reason=LocationAnomaly.REASON_NIGHT_ACTIVITY,
+                defaults={
+                    'score': max(1.0, len(payload.get('points', []))) * 0.5,
+                    'details': payload,
+                },
+            )
+            if created:
+                anomalies_created += 1
+
+    summary = {
+        'status': 'ok',
+        'employees': len({k[0] for k in (list(high_speed_reasons.keys()) + list(long_jump_reasons.keys()) + list(night_activity_reasons.keys()))}),
+        'anomalies_created': anomalies_created,
+        'duration_seconds': (timezone.now() - start_time).total_seconds(),
+    }
+    logger.info("detect_location_anomalies: summary=%s", summary)
     return summary
 
 
@@ -319,6 +479,7 @@ def send_duty_reminder_notification(message_type):
     from employees.models import Employee, DeviceToken
     from django.conf import settings
     import os
+    from config.circuit_breakers import with_circuit
 
     MESSAGES = {
         'early': {
@@ -369,51 +530,66 @@ def send_duty_reminder_notification(message_type):
         import firebase_admin
         from firebase_admin import credentials, messaging
 
-        if not firebase_admin._apps:
-            cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred)
+        def _send_all():
+            nonlocal tokens, payload
+            if not firebase_admin._apps:
+                cred = credentials.Certificate(cred_path)
+                firebase_admin.initialize_app(cred)
 
-        sent = 0
-        invalid_tokens = []
+            sent = 0
+            invalid_tokens = []
 
-        for token in tokens:
-            try:
-                msg = messaging.Message(
-                    notification=messaging.Notification(
-                        title=payload['title'],
-                        body=payload['body'],
-                    ),
-                    android=messaging.AndroidConfig(
-                        priority='high',
-                        notification=messaging.AndroidNotification(
-                            channel_id='duty_reminder',
+            for token in tokens:
+                try:
+                    msg = messaging.Message(
+                        notification=messaging.Notification(
                             title=payload['title'],
                             body=payload['body'],
-                            priority='high',
                         ),
-                    ),
-                    token=token,
-                )
-                messaging.send(msg)
-                sent += 1
-            except messaging.UnregisteredError:
-                invalid_tokens.append(token)
-            except messaging.InvalidArgumentError:
-                invalid_tokens.append(token)
-            except Exception as e:
-                logger.warning(f"FCM send failed for token {token[:20]}...: {e}")
-                if 'not-registered' in str(e).lower() or 'invalid' in str(e).lower():
+                        android=messaging.AndroidConfig(
+                            priority='high',
+                            notification=messaging.AndroidNotification(
+                                channel_id='duty_reminder',
+                                title=payload['title'],
+                                body=payload['body'],
+                                priority='high',
+                            ),
+                        ),
+                        token=token,
+                    )
+                    messaging.send(msg)
+                    sent += 1
+                except (messaging.UnregisteredError, messaging.InvalidArgumentError):
                     invalid_tokens.append(token)
+                except Exception as e:
+                    logger.warning(f"FCM send failed for token {token[:20]}...: {e}")
+                    if 'not-registered' in str(e).lower() or 'invalid' in str(e).lower():
+                        invalid_tokens.append(token)
 
-        if invalid_tokens:
-            DeviceToken.objects.filter(fcm_token__in=invalid_tokens).delete()
-            logger.info(f"Removed {len(invalid_tokens)} invalid FCM tokens")
+            if invalid_tokens:
+                DeviceToken.objects.filter(fcm_token__in=invalid_tokens).delete()
+                logger.info(f"Removed {len(invalid_tokens)} invalid FCM tokens")
+
+            return sent, len(invalid_tokens)
+
+        try:
+            sent, invalid_count = with_circuit('fcm', _send_all)
+        except RuntimeError as e:
+            if str(e) == 'circuit_open':
+                logger.warning("send_duty_reminder_notification: FCM circuit open, skipping send")
+                return {
+                    'status': 'skipped',
+                    'reason': 'fcm_circuit_open',
+                    'message_type': message_type,
+                    'timestamp': timezone.now().isoformat(),
+                }
+            raise
 
         summary = {
             'status': 'completed',
             'message_type': message_type,
             'tokens_sent': sent,
-            'tokens_invalid_removed': len(invalid_tokens),
+            'tokens_invalid_removed': invalid_count,
             'timestamp': timezone.now().isoformat(),
         }
         logger.info(f"Duty reminder push completed: {summary}")
