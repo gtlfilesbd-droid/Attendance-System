@@ -243,7 +243,8 @@ def auto_end_duty_sessions():
         elif remark is None and (now - session_start).total_seconds() >= nine_hours_secs:
             remark = "9 hours active."
 
-        # Priority 3: 30 min no LocationLog (scoped to this session; timezone-safe comparison)
+        # Priority 3: 30 min inactive – use BOTH last LocationLog AND last_heartbeat_at (Phase 1 fix)
+        # Only auto-end when neither location nor heartbeat in last 30 min (grace 35 min for heartbeat)
         elif remark is None:
             last_log = (
                 LocationLog.objects.filter(
@@ -256,11 +257,21 @@ def auto_end_duty_sessions():
             )
             if last_log is not None and timezone.is_naive(last_log):
                 last_log = timezone.make_aware(last_log, timezone.get_current_timezone())
-            if last_log is None or last_log < cutoff_30min:
+            last_heartbeat = getattr(session.employee, 'last_heartbeat_at', None)
+            if last_heartbeat is not None and timezone.is_naive(last_heartbeat):
+                last_heartbeat = timezone.make_aware(last_heartbeat, timezone.get_current_timezone())
+            # Effective last activity = max(location, heartbeat, session_start)
+            effective_last = session_start
+            if last_log is not None and last_log > effective_last:
+                effective_last = last_log
+            if last_heartbeat is not None and last_heartbeat > effective_last:
+                effective_last = last_heartbeat
+            grace_minutes = 35  # 30 + 5 min retry window
+            cutoff_grace = effective_last + timedelta(minutes=grace_minutes)
+            if now > cutoff_grace:
                 remark = "User kept mobile network turned off for 30 minutes."
-                if last_log is not None:
-                    computed = last_log + timedelta(minutes=30)
-                    auto_close_end_time = min(computed, now)
+                computed = effective_last + timedelta(minutes=30)
+                auto_close_end_time = min(computed, now)
 
         if remark:
             last_log_obj = (

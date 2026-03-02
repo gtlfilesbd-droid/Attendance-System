@@ -1,17 +1,18 @@
 from django.contrib import admin
 from django.utils import timezone
-from .models import UserLoginLog
+from .models import UserLoginLog, MobileLog
 
 
 @admin.register(UserLoginLog)
 class UserLoginLogAdmin(admin.ModelAdmin):
     list_display = [
-        'id', 'get_actor', 'source', 'action', 'formatted_date', 'formatted_time',
+        'id', 'get_actor', 'source', 'action', 'reason', 'device_brand', 'device_model', 'android_version',
+        'formatted_date', 'formatted_time',
     ]
-    list_filter = ['action', 'source', 'user']
+    list_filter = ['action', 'source', 'reason', 'user']
     search_fields = ['user__username', 'user__email', 'employee__name', 'employee__email', 'employee__employee_id']
     ordering = ['-timestamp']
-    readonly_fields = ['id', 'user', 'employee', 'action', 'source', 'timestamp']
+    readonly_fields = ['id', 'user', 'employee', 'action', 'source', 'timestamp', 'reason', 'device_brand', 'device_model', 'android_version']
 
     def get_actor(self, obj):
         if obj.user_id:
@@ -43,3 +44,26 @@ class UserLoginLogAdmin(admin.ModelAdmin):
         return '—'
     formatted_time.short_description = 'Time'
     formatted_time.admin_order_field = 'timestamp'
+
+
+@admin.register(MobileLog)
+class MobileLogAdmin(admin.ModelAdmin):
+    list_display = [
+        'id', 'employee', 'timestamp', 'level', 'category', 'message_short',
+        'device_brand', 'device_model', 'device_android_version', 'received_at',
+    ]
+    list_filter = ['level', 'category', 'device_brand', 'device_android_version']
+    search_fields = ['employee__name', 'employee__email', 'message']
+    ordering = ['-timestamp']
+    readonly_fields = [
+        'employee', 'timestamp', 'level', 'category', 'message', 'extra_json',
+        'stack_trace', 'duration_ms', 'device_android_version', 'device_brand',
+        'device_model', 'received_at',
+    ]
+
+    def message_short(self, obj):
+        return (obj.message[:60] + '...') if obj.message and len(obj.message) > 60 else (obj.message or '')
+    message_short.short_description = 'Message'
+
+    def has_add_permission(self, request):
+        return False

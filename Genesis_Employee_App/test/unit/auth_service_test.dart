@@ -43,10 +43,15 @@ void main() {
       await expectLater(authService.logout(), completes);
     });
 
-    test('login with invalid credentials returns false', () async {
+    test('logout with reason completes without error (Phase 1)', () async {
+      await expectLater(authService.logout(reason: 'MANUAL_LOGOUT'), completes);
+    });
+
+    test('login with invalid credentials returns error message', () async {
       // No mock server; real request will fail in test env
-      final result = await authService.login('invalid@test.com', 'wrong');
-      expect(result, isFalse);
+      final errorMessage = await authService.login('invalid@test.com', 'wrong');
+      expect(errorMessage, isNotNull);
+      expect(errorMessage, isNotEmpty);
     });
   });
 }

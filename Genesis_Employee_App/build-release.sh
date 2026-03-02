@@ -25,6 +25,7 @@ case "$choice" in
     flutter build apk --release
     echo ""
     echo "[OK] APK: build/app/outputs/flutter-apk/app-release.apk"
+    echo "For production HTTPS: flutter build apk --release --dart-define=BASE_URL=https://your-domain.com/api"
     ;;
   2)
     echo ""
@@ -38,6 +39,7 @@ case "$choice" in
     echo ""
     echo "[OK] AAB: build/app/outputs/bundle/release/app-release.aab"
     echo "Upload this file to Google Play Console."
+    echo "For production HTTPS: flutter build appbundle --release --dart-define=BASE_URL=https://your-domain.com/api"
     ;;
   3)
     echo ""

@@ -110,7 +110,7 @@ You **cannot** copy the project folder to your mobile and run it. You must:
 2. **Copy the APK file** to your phone (USB cable, email, cloud, or shared folder). The file is:  
    `build\app\outputs\flutter-apk\app-release.apk`
 3. **On your phone:** Open the APK file (you may need to allow “Install from unknown sources” in Settings) and install.
-4. **For the app to work:** Your **backend must be running** on your PC (e.g. at `http://192.168.1.104:8000`), and the phone must be on the **same Wi‑Fi network**. The app is configured in `lib/config/app_config.dart` with `baseUrl` pointing to your PC IP; if you changed the IP there, rebuild the APK and install again.
+4. **For the app to work:** Your **backend must be running** on your PC (e.g. at `http://192.168.1.104:8000`), and the phone must be on the **same Wi‑Fi network**. The app’s default `baseUrl` is in `lib/config/app_config.dart`; to point to a different server, rebuild with `--dart-define=BASE_URL=http://YOUR_PC_IP:8000/api` (see “API base URL and HTTPS” below).
 
 Yes — once you build the APK, copy that **single APK file** to your mobile and install it; the app will work as long as the backend is running and the phone can reach it on the network.
 
@@ -123,6 +123,18 @@ flutter build appbundle --release
 Output: `build/app/outputs/bundle/release/app-release.aab`
 
 Upload the **AAB** to Google Play Console; Play will generate optimized APKs for devices.
+
+**API base URL and HTTPS (Phase 6):**  
+The app’s API base URL is **configurable at build time**. By default it uses the dev URL in `lib/config/app_config.dart`. For **production**, use HTTPS and your real domain by passing `BASE_URL`:
+
+```bash
+flutter build apk --release --dart-define=BASE_URL=https://your-api-domain.com/api
+flutter build appbundle --release --dart-define=BASE_URL=https://your-api-domain.com/api
+```
+
+- Use **https** in production; do not use **http** for live traffic.
+- The value must include the path up to and including `/api` (no trailing slash after `api`).
+- Example: `https://api.genesis.com/api` — the app then calls e.g. `https://api.genesis.com/api/employees/auth/login/`.
 
 ---
 

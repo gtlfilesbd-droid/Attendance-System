@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,7 +10,9 @@ import '../config/app_config.dart';
 import '../utils/working_hours.dart' as wh;
 import 'auth_service.dart';
 import 'api_service.dart';
+import 'app_log_upload_service.dart';
 import 'background_worker.dart';
+import 'offline_queue_crypto.dart';
 
 class LocationService {
   // Singleton pattern
@@ -20,6 +23,8 @@ class LocationService {
   }
   
   LocationService._internal();
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
 
   /// Initialize: Request permissions and setup background worker
   Future<void> initializeService() async {
@@ -108,11 +113,32 @@ class LocationService {
   /// Start Tracking Manually (Start duty) - runs until user presses End duty
   Future<void> startTracking() async {
     await BackgroundWorker().startService();
+    _startConnectivityListener();
   }
 
   /// Stop Tracking
   Future<void> stopTracking() async {
+    _stopConnectivityListener();
     await BackgroundWorker().stopService();
+  }
+
+  /// Phase 1: When network returns (WiFi/Mobile), trigger sync so offline data goes up quickly.
+  void _startConnectivityListener() {
+    _stopConnectivityListener();
+    _connectivitySub = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> result) {
+      final connected = result.any((r) =>
+          r == ConnectivityResult.mobile || r == ConnectivityResult.wifi || r == ConnectivityResult.ethernet);
+      if (connected) {
+        print('LocationService: Network restored – triggering sync');
+        syncOfflineData();
+        AppLogUploadService().uploadBatch();
+      }
+    });
+  }
+
+  void _stopConnectivityListener() {
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
   }
 
   static const String _keyLastSentLat = 'last_sent_lat';
@@ -224,20 +250,20 @@ class LocationService {
     }
   }
 
+  /// Phase 8: Offline queue encrypted at rest (AES-256); key in secure storage.
+  static const int _offlineQueueMaxSize = 1000;
+  static const String _offlineQueueKey = 'offline_locations';
+
   static Future<void> _saveOffline(Map<String, dynamic> data) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final List<String> offlineData = prefs.getStringList('offline_locations') ?? [];
-      
+      final rawList = prefs.getStringList(_offlineQueueKey) ?? [];
+      final offlineData = await OfflineQueueCrypto.decryptList(rawList);
       offlineData.add(jsonEncode(data));
-      
-      // Limit storage to prevent explosion (e.g. keep last 1000 points)
-      if (offlineData.length > 1000) {
-        offlineData.removeAt(0);
-      }
-      
-      await prefs.setStringList('offline_locations', offlineData);
-      print("FLUTTER_BG_SERVICE: Saved to offline storage. Count: ${offlineData.length}");
+      if (offlineData.length > _offlineQueueMaxSize) offlineData.removeAt(0);
+      final encrypted = await OfflineQueueCrypto.encryptList(offlineData);
+      await prefs.setStringList(_offlineQueueKey, encrypted);
+      print("FLUTTER_BG_SERVICE: Saved to offline storage (encrypted). Count: ${offlineData.length}");
     } catch (e) {
       print("FLUTTER_BG_SERVICE: Error saving offline $e");
     }
@@ -248,26 +274,40 @@ class LocationService {
   /// Max points to process per sync run to avoid long blocks; rest on next run.
   static const int maxPointsPerSyncRun = 150;
 
+  /// Phase 4: Sync state – only one sync runs at a time.
+  static bool _syncInProgress = false;
+  /// Current offline location sync state.
+  static bool get isSyncInProgress => _syncInProgress;
+  /// Idle = no sync running; Syncing = [syncOfflineData] in progress (further calls no-op).
+  static String get offlineSyncState => _syncInProgress ? 'syncing' : 'idle';
+
   /// Returns true if there are offline locations waiting to be synced.
   static Future<bool> hasPendingOfflineData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final list = prefs.getStringList('offline_locations') ?? [];
+      final list = prefs.getStringList(_offlineQueueKey) ?? [];
       return list.isNotEmpty;
     } catch (_) {
       return false;
     }
   }
 
-  static const int _bulkThreshold = 5;
+  /// Phase 3: Use bulk upload whenever there is at least one offline point.
+  static const int _bulkThreshold = 1;
   static const int _bulkMaxPerRequest = 200;
 
   static Future<void> syncOfflineData() async {
+    if (_syncInProgress) return;
+    _syncInProgress = true;
     try {
       final prefs = await SharedPreferences.getInstance();
-      final List<String> offlineData = prefs.getStringList('offline_locations') ?? [];
+      final rawList = prefs.getStringList(_offlineQueueKey) ?? [];
+      final offlineData = await OfflineQueueCrypto.decryptList(rawList);
 
-      if (offlineData.isEmpty) return;
+      if (offlineData.isEmpty) {
+        _syncInProgress = false;
+        return;
+      }
 
       print("FLUTTER_BG_SERVICE: Syncing ${offlineData.length} offline records...");
       final stopAt = DateTime.now().add(maxSyncDuration);
@@ -277,7 +317,9 @@ class LocationService {
         final batchSize = remainingData.length.clamp(0, _bulkMaxPerRequest).clamp(0, maxPointsPerSyncRun);
         final batch = remainingData.take(batchSize).toList();
         final List<Map<String, dynamic>> payloads = [];
-        for (final jsonStr in batch) {
+        final List<int> batchIndexForPayload = []; // payload index -> batch index
+        for (int bi = 0; bi < batch.length; bi++) {
+          final jsonStr = batch[bi];
           try {
             final data = jsonDecode(jsonStr) as Map<String, dynamic>;
             final lat = data['latitude'];
@@ -286,24 +328,38 @@ class LocationService {
             final bat = data['battery_level'];
             if (lat == null || lng == null || acc == null || bat == null) continue;
             final accuracy = (acc is num) ? acc.toDouble() : null;
-            final batteryLevel = (bat is int) ? bat : (bat is num ? (bat as num).toInt() : null);
+            final batteryLevel = (bat is int) ? bat : (bat is num ? bat.toInt() : null);
             if (accuracy == null || batteryLevel == null) continue;
+            final speedVal = data['speed'];
             payloads.add({
               'latitude': (lat is num) ? lat.toDouble() : 0.0,
               'longitude': (lng is num) ? lng.toDouble() : 0.0,
               'accuracy': accuracy,
               'battery_level': batteryLevel,
-              'speed': data['speed'] is num ? (data['speed'] as num).toDouble() : null,
+              'speed': speedVal is num ? speedVal.toDouble() : null,
               'timestamp': data['timestamp'] is String ? data['timestamp'] as String : DateTime.now().toIso8601String(),
             });
+            batchIndexForPayload.add(bi);
           } catch (_) {}
         }
-        final created = payloads.isEmpty ? 0 : await ApiService().logLocationBulk(payloads);
-        if (created > 0) {
-          final rest = remainingData.sublist(batch.length);
-          final failedInBatch = batch.sublist(created > batch.length ? batch.length : created);
-          remainingData = failedInBatch + rest;
-          await prefs.setStringList('offline_locations', remainingData);
+        final result = payloads.isEmpty ? null : await ApiService().logLocationBulk(payloads);
+        if (result != null) {
+          final created = result['created'] as int? ?? 0;
+          final errorIndices = (result['errorIndices'] as List<dynamic>?)?.cast<int>() ?? <int>[];
+          final failedBatchIndices = errorIndices
+              .where((pi) => pi >= 0 && pi < batchIndexForPayload.length)
+              .map((pi) => batchIndexForPayload[pi])
+              .toSet();
+          final failedBatch = <String>[];
+          for (int i = 0; i < batch.length; i++) {
+            if (failedBatchIndices.contains(i)) failedBatch.add(batch[i]);
+          }
+          final rest = remainingData.length > batch.length ? remainingData.sublist(batch.length) : <String>[];
+          remainingData = failedBatch + rest;
+          final toStore = remainingData.isEmpty
+              ? <String>[]
+              : await OfflineQueueCrypto.encryptList(remainingData);
+          await prefs.setStringList(_offlineQueueKey, toStore);
           print("FLUTTER_BG_SERVICE: Bulk sync created $created. Remaining: ${remainingData.length}");
         }
         return;
@@ -324,9 +380,10 @@ class LocationService {
           final latitude = (lat is num) ? lat.toDouble() : null;
           final longitude = (lng is num) ? lng.toDouble() : null;
           final accuracy = (acc is num) ? acc.toDouble() : null;
-          final batteryLevel = (bat is int) ? bat : (bat is num ? (bat as num).toInt() : null);
+          final batteryLevel = (bat is int) ? bat : (bat is num ? bat.toInt() : null);
           if (latitude == null || longitude == null || accuracy == null || batteryLevel == null) continue;
-          final speed = data['speed'] is num ? (data['speed'] as num).toDouble() : null;
+          final speedVal = data['speed'];
+          final speed = speedVal is num ? speedVal.toDouble() : null;
           final timestamp = data['timestamp'] is String ? data['timestamp'] as String? : null;
           final success = await ApiService().logLocation(
             latitude: latitude,
@@ -341,16 +398,25 @@ class LocationService {
             processed++;
             i--;
           }
-        } catch (_) {}
+        } catch (_) {
+          // Phase 8: Drop unparseable/corrupt entries so they do not accumulate
+          remainingData.removeAt(i);
+          i--;
+        }
         if ((i + 1) % chunkSize == 0) await Future.delayed(Duration.zero);
       }
 
       if (remainingData.length != offlineData.length || remainingData.isNotEmpty) {
-        await prefs.setStringList('offline_locations', remainingData);
+        final toStore = remainingData.isEmpty
+            ? <String>[]
+            : await OfflineQueueCrypto.encryptList(remainingData);
+        await prefs.setStringList(_offlineQueueKey, toStore);
         print("FLUTTER_BG_SERVICE: Sync run done. Remaining: ${remainingData.length}");
       }
     } catch (e) {
       print("FLUTTER_BG_SERVICE: Error syncing $e");
+    } finally {
+      _syncInProgress = false;
     }
   }
 }

@@ -38,6 +38,20 @@ Content-Type: application/json
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
 ```
 
+## Rate limiting (Phase 7)
+
+The API uses DRF throttling to protect against abuse:
+
+- **Employee login** (`POST /api/employees/auth/login/`): **10 requests/minute** per IP (anonymous). Excess requests receive `429 Too Many Requests` with body `{"detail": "Request was throttled. Expected available in X seconds."}`. The mobile app shows this (or a friendly "Too many attempts") to the user.
+- **Location/heartbeat** (log-location, log-location/bulk, heartbeat): **200 requests/minute** per authenticated user.
+- **Other endpoints**: Default **120/min** (authenticated) or **60/min** (anonymous).
+
+Rates are configured in `config/settings.py` and custom throttle classes in `config/throttling.py`.
+
+## Mobile app – offline queue (Phase 8)
+
+The Flutter app stores pending location points in an **encrypted** offline queue when the device is offline. Data is encrypted at rest using AES-256-CBC; the encryption key is kept in secure storage (Android: Keystore; iOS: Keychain). After going online, the app syncs the queue to `POST /api/tracking/log-location/bulk/` and clears successfully sent entries. Queue size is capped (e.g. 1000 points).
+
 ## Employee Management API
 
 ### List Employees

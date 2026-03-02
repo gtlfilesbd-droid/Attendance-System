@@ -21,20 +21,29 @@ cd Genesis_Employee_App
 flutter pub get
 ```
 
-### 2. Configure API Endpoint
+### 2. Configure API Endpoint (Phase 6: configurable + HTTPS)
 
-Edit `lib/config/app_config.dart` and update the `baseUrl`:
+The API base URL is **configurable at build time** (default is in `lib/config/app_config.dart`).
+
+**Option A – Use the default:**  
+Edit `lib/config/app_config.dart` and change the `defaultValue` in `baseUrl` (used when you don’t pass `BASE_URL`):
 
 ```dart
-static const String baseUrl = 'http://your-server-ip:8000/api';
+defaultValue: 'http://your-server-ip:8000/api',
 ```
 
-For local development with Android Emulator:
-- Use `http://10.0.2.2:8000/api` (Android Emulator special IP)
-- Use `http://localhost:8000/api` (iOS Simulator)
+**Option B – Set URL when building:**  
+```bash
+flutter run --dart-define=BASE_URL=http://192.168.x.x:8000/api
+flutter build apk --release --dart-define=BASE_URL=https://your-api.com/api
+```
 
-For physical devices:
-- Use your computer's local IP: `http://192.168.x.x:8000/api`
+For local development:
+- Android Emulator: `http://10.0.2.2:8000/api`
+- iOS Simulator: `http://localhost:8000/api`
+- Physical device (same Wi‑Fi): your PC’s IP, e.g. `http://192.168.x.x:8000/api`
+
+**Production:** Use **HTTPS** only: build with `--dart-define=BASE_URL=https://your-domain.com/api`. See `docs/BUILD_AND_RELEASE.md`.
 
 ### 3. Android Setup
 
@@ -124,7 +133,7 @@ flutter run -d <device-id>
 ### Issue: Cannot connect to API
 **Solution**:
 - Check that Django backend is running
-- Verify the `baseUrl` in `app_config.dart`
+- Verify the API base URL (default in `app_config.dart` or `--dart-define=BASE_URL=...`)
 - For Android Emulator, use `10.0.2.2` instead of `localhost`
 - Check firewall settings
 

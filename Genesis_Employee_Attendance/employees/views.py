@@ -1,7 +1,7 @@
 import json
 import os
 from rest_framework import viewsets, status, generics
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.pagination import PageNumberPagination
@@ -13,6 +13,8 @@ from .serializers import (
     EmployeeSerializer, EmployeeLoginSerializer, EmployeeProfileSerializer
 )
 import logging
+from config.throttling import LoginRateThrottle
+
 logger = logging.getLogger('employees.views')
 
 
@@ -57,6 +59,7 @@ def employee_me(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([LoginRateThrottle])
 def employee_login(request):
     """
     Employee login endpoint
@@ -132,8 +135,9 @@ def employee_login(request):
 @permission_classes([IsAuthenticated])
 def employee_logout(request):
     """
-    Employee logout endpoint (app). Logs the logout event then client clears token.
+    Employee logout endpoint (app). Logs the logout event with reason and device (Phase 1).
     POST /api/employees/auth/logout/
+    Body (optional): { "reason": "TOKEN_REFRESH_FAILED", "device_brand": "...", "device_model": "...", "android_version": "14" }
     Requires: Bearer token (JWT).
     """
     user = request.user
@@ -142,6 +146,11 @@ def employee_logout(request):
             {'success': False, 'message': 'Not an employee account.'},
             status=status.HTTP_403_FORBIDDEN,
         )
+    data = (request.data or {}) if hasattr(request, 'data') else {}
+    reason = (data.get('reason') or '').strip() or None
+    device_brand = (data.get('device_brand') or '').strip() or None
+    device_model = (data.get('device_model') or '').strip() or None
+    android_version = (data.get('android_version') or '').strip() or None
     try:
         from django.utils import timezone
         from audit.models import UserLoginLog
@@ -150,6 +159,10 @@ def employee_logout(request):
             action='LOGOUT',
             source=UserLoginLog.SOURCE_APP,
             timestamp=timezone.now(),
+            reason=reason,
+            device_brand=device_brand,
+            device_model=device_model,
+            android_version=android_version,
         )
     except Exception:
         pass

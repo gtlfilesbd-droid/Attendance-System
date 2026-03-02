@@ -141,6 +141,8 @@ class BackgroundWorker {
     double? lastSentLng;
     DateTime? lastSentTime;
     DateTime? lastHeartbeatTime;
+    // Phase 1: Watchdog – if no location/heartbeat sent for 5 min, stop service (app can restart on resume)
+    const int watchdogInactiveMinutes = 5;
 
     service.on('stopService').listen((event) {
       positionSubscription?.cancel();
@@ -180,8 +182,8 @@ class BackgroundWorker {
           position ??= await Geolocator.getCurrentPosition(
             desiredAccuracy: LocationAccuracy.high,
           );
+          // ignore: unnecessary_null_comparison - position can be null if getCurrentPosition failed
           if (position == null) return;
-
           final now = DateTime.now();
           final bool neverSent = lastSentLat == null || lastSentLng == null || lastSentTime == null;
           double displacementMeters = double.infinity;
@@ -195,11 +197,19 @@ class BackgroundWorker {
             displacementMeters = meters.toDouble();
           }
 
-          // Speed in m/s (Position.speed is m/s). Use for adaptive interval.
+          // Phase 5: Battery-aware interval – use longer intervals when battery is low.
+          final int batLevel = await battery.batteryLevel;
+          final bool powerSave = batLevel <= AppConfig.batteryLowThresholdPercent;
+          final int intervalWhenDuty = powerSave
+              ? AppConfig.locationUpdateIntervalSecondsWhenDutyPowerSave
+              : AppConfig.locationUpdateIntervalSecondsWhenDuty;
+          final int intervalWhenMoving = powerSave
+              ? AppConfig.locationUpdateIntervalSecondsWhenMovingPowerSave
+              : AppConfig.locationUpdateIntervalSecondsWhenMoving;
           final double speedMps = position.speed >= 0 ? position.speed : 0.0;
           final int intervalSeconds = speedMps >= AppConfig.speedThresholdMovingMps
-              ? AppConfig.locationUpdateIntervalSecondsWhenMoving
-              : AppConfig.locationUpdateIntervalSecondsWhenDuty;
+              ? intervalWhenMoving
+              : intervalWhenDuty;
           final int elapsed = lastSentTime != null
               ? now.difference(lastSentTime!).inSeconds
               : intervalSeconds + 1;
@@ -216,21 +226,31 @@ class BackgroundWorker {
             lastSentTime = now;
           }
 
-          // Heartbeat every 15 min for last_seen / offline detection
+          // Heartbeat every 15 min for last_seen / offline detection (reuse batLevel from Phase 5).
           final needHeartbeat = lastHeartbeatTime == null ||
               now.difference(lastHeartbeatTime!).inMinutes >= 15;
           if (needHeartbeat) {
             try {
-              final bat = await battery.batteryLevel;
               final sent = await ApiService().sendHeartbeat(
                 appVersion: AppConfig.appVersion,
-                batteryLevel: bat,
+                batteryLevel: batLevel,
                 isTrackingEnabled: true,
                 latestLocationTimestamp: lastSentTime?.toIso8601String(),
                 deviceOs: 'Android',
               );
               if (sent) lastHeartbeatTime = now;
             } catch (_) {}
+          }
+
+          // Phase 1 watchdog: if no location and no heartbeat sent for 5 min, stop service (app will restart on resume)
+          final lastActivity = (lastSentTime != null && lastHeartbeatTime != null)
+              ? (lastSentTime!.isAfter(lastHeartbeatTime!) ? lastSentTime! : lastHeartbeatTime!)
+              : null;
+          if (lastActivity != null &&
+              now.difference(lastActivity).inMinutes >= watchdogInactiveMinutes) {
+            print('BackgroundWorker: No activity for $watchdogInactiveMinutes min – stopping service (watchdog)');
+            service.invoke('stopService');
+            return;
           }
         } catch (e) {
           print('BackgroundWorker: Error getting location $e');

@@ -5,7 +5,7 @@ import time as time_module
 import urllib.request
 import urllib.parse
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, action, throttle_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from rest_framework.pagination import PageNumberPagination
@@ -18,6 +18,7 @@ from .serializers import (
     LocationLogSerializer, LocationCreateSerializer, RouteHistorySerializer
 )
 from config.circuit_breakers import with_circuit
+from config.throttling import TrackingRateThrottle
 
 # Dashboard (template) views
 from django.contrib.auth.decorators import login_required
@@ -227,6 +228,7 @@ def resolve_address(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([TrackingRateThrottle])
 def log_location(request):
     """
     Log location from mobile app
@@ -303,6 +305,7 @@ def log_location(request):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([TrackingRateThrottle])
 def heartbeat(request):
     """
     Heartbeat for last_seen and offline detection.
@@ -363,6 +366,7 @@ def _log_location_single(employee, data):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([TrackingRateThrottle])
 def log_location_bulk(request):
     """
     Bulk log locations (offline sync). POST /api/tracking/log-location/bulk/

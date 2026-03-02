@@ -26,7 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
       _errorMessage = null;
     });
 
-    final success = await _authService.login(
+    final errorMessage = await _authService.login(
       _emailController.text,
       _passwordController.text,
     );
@@ -36,14 +36,14 @@ class _LoginScreenState extends State<LoginScreen> {
         _isLoading = false;
       });
 
-      if (success) {
+      if (errorMessage == null) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const HomeScreen()),
         );
       } else {
         setState(() {
-          _errorMessage = 'Invalid username or password';
+          _errorMessage = errorMessage;
         });
       }
     }

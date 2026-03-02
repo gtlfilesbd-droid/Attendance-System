@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import '../config/app_config.dart';
+import 'app_log_service.dart';
 import 'auth_service.dart';
 
 /// Route API response: locations list and optional distance in km from backend.
@@ -38,6 +39,19 @@ class ApiService {
 
   /// Test-only: when set, getMyAttendance() returns this instead of calling the API.
   static Future<Map<String, dynamic>> Function({String? startDate, String? endDate})? mockGetMyAttendance;
+
+  /// Phase 7: When tracking/heartbeat gets 429, set so UI can show "Too many requests; will retry later."
+  static String? lastTrackingThrottleMessage;
+
+  /// Phase 7: User-friendly message for 429 responses (login or tracking).
+  static String _messageFor429(DioException e) {
+    final detail = e.response?.data;
+    if (detail is Map && detail['detail'] != null) {
+      final s = detail['detail'].toString();
+      if (s.isNotEmpty) return s;
+    }
+    return 'Too many requests. Please try again later.';
+  }
 
   final Dio _dio = Dio();
   
@@ -126,12 +140,18 @@ class ApiService {
               }
             }
             
-            // If refresh failed, logout and navigate to login
-            await authService.logout();
+            // If refresh failed, log and logout (Phase 1 + 2)
+            try {
+              await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
+            } catch (_) {}
+            await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
             _navigateToLoginOnSessionExpired();
           } catch (refreshError) {
             print('Token refresh failed: $refreshError');
-            await AuthService().logout();
+            try {
+              await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path}, stackTrace: refreshError.toString());
+            } catch (_) {}
+            await AuthService().logout(reason: 'TOKEN_REFRESH_FAILED');
             _navigateToLoginOnSessionExpired();
           }
         }
@@ -148,11 +168,16 @@ class ApiService {
   // ---------------------------------------------------------------------------
 
   /// Login Method
-  /// POST /employees/auth/logout/ - notify backend for audit log (call before clearing token).
-  Future<void> logout() async {
+  /// POST /employees/auth/logout/ - notify backend for audit log (Phase 1: reason + optional device).
+  Future<void> logout({String? reason, String? deviceBrand, String? deviceModel, String? androidVersion}) async {
     try {
       ApiService().initialize();
-      await _dio.post(AppConfig.logoutEndpoint);
+      final body = <String, dynamic>{};
+      if (reason != null && reason.isNotEmpty) body['reason'] = reason;
+      if (deviceBrand != null && deviceBrand.isNotEmpty) body['device_brand'] = deviceBrand;
+      if (deviceModel != null && deviceModel.isNotEmpty) body['device_model'] = deviceModel;
+      if (androidVersion != null && androidVersion.isNotEmpty) body['android_version'] = androidVersion;
+      await _dio.post(AppConfig.logoutEndpoint, data: body.isNotEmpty ? body : null);
     } on Exception catch (_) {
       // Best effort; do not block logout if offline or token expired
     }
@@ -178,14 +203,20 @@ class ApiService {
         };
       }
     } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        final msg = e.response?.data is Map && e.response?.data['detail'] != null
+            ? e.response!.data['detail'].toString()
+            : 'Too many attempts. Please try again in a minute.';
+        return {'success': false, 'message': msg.isNotEmpty ? msg : 'Too many attempts. Please try again in a minute.'};
+      }
       return {
         'success': false,
-        'message': e.response?.data['message'] ?? 'Connection error'
+        'message': e.response?.data['message'] ?? 'Connection error',
       };
     } catch (e) {
       return {
         'success': false,
-        'message': 'Unexpected error: $e'
+        'message': 'Unexpected error: $e',
       };
     }
   }
@@ -253,12 +284,17 @@ class ApiService {
       );
 
       final ok = response.statusCode == 200 || response.statusCode == 201;
+      if (ok) lastTrackingThrottleMessage = null;
       print('API: logLocation response status=${response.statusCode} success=$ok');
       if (kDebugMode && response.data != null) {
         print('API: logLocation response data: ${response.data}');
       }
       return ok;
     } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        lastTrackingThrottleMessage = _messageFor429(e);
+        if (kDebugMode) print('API: logLocation 429: $lastTrackingThrottleMessage');
+      }
       print('API: logLocation DioException: ${e.type} ${e.message}');
       print('API: logLocation response status: ${e.response?.statusCode}');
       print('API: logLocation response data: ${e.response?.data}');
@@ -272,9 +308,9 @@ class ApiService {
 
   /// Bulk log locations (offline sync). POST /tracking/log-location/bulk/
   /// [locations] list of maps with latitude, longitude, timestamp, accuracy, battery_level, optional speed.
-  /// Returns number of successfully created, or -1 on failure.
-  Future<int> logLocationBulk(List<Map<String, dynamic>> locations) async {
-    if (locations.isEmpty) return 0;
+  /// Returns { 'created': int, 'errorIndices': List<int> } on success, null on failure (Phase 3).
+  Future<Map<String, dynamic>?> logLocationBulk(List<Map<String, dynamic>> locations) async {
+    if (locations.isEmpty) return {'created': 0, 'errorIndices': <int>[]};
     try {
       ApiService().initialize();
       final employeeData = await AuthService().getEmployeeData();
@@ -293,17 +329,28 @@ class ApiService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final data = response.data;
         if (data is Map && data['success'] == true) {
-          final created = data['created'];
-          return created is int ? created : 0;
+          lastTrackingThrottleMessage = null;
+          final created = data['created'] is int ? data['created'] as int : 0;
+          final errors = data['errors'] as List<dynamic>?;
+          final errorIndices = errors
+                  ?.map((e) => e is Map && e['index'] != null ? (e['index'] is int ? e['index'] as int : (e['index'] as num).toInt()) : -1)
+                  .where((i) => i >= 0)
+                  .toList() ??
+              <int>[];
+          return {'created': created, 'errorIndices': errorIndices};
         }
       }
-      return -1;
+      return null;
     } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        lastTrackingThrottleMessage = _messageFor429(e);
+        if (kDebugMode) print('API: logLocationBulk 429: $lastTrackingThrottleMessage');
+      }
       if (kDebugMode) print('API: logLocationBulk error: ${e.message}');
-      return -1;
+      return null;
     } catch (e) {
       if (kDebugMode) print('API: logLocationBulk error: $e');
-      return -1;
+      return null;
     }
   }
 
@@ -326,8 +373,14 @@ class ApiService {
       if (latestLocationTimestamp != null) payload['latest_location_timestamp'] = latestLocationTimestamp;
       if (deviceOs != null) payload['device_os'] = deviceOs;
       final response = await _dio.post(AppConfig.heartbeatEndpoint, data: payload);
-      return response.statusCode == 200;
-    } on DioException catch (_) {
+      final ok = response.statusCode == 200;
+      if (ok) lastTrackingThrottleMessage = null;
+      return ok;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 429) {
+        lastTrackingThrottleMessage = _messageFor429(e);
+        if (kDebugMode) print('API: sendHeartbeat 429: $lastTrackingThrottleMessage');
+      }
       return false;
     } catch (_) {
       return false;

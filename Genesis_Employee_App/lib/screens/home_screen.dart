@@ -397,6 +397,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _onRefresh() async {
     ApiService().initialize();
+    // Phase 7: Show throttle message from previous sync if any
+    final throttleMsg = ApiService.lastTrackingThrottleMessage;
+    if (throttleMsg != null && throttleMsg.isNotEmpty && mounted && context.mounted) {
+      ApiService.lastTrackingThrottleMessage = null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(throttleMsg)),
+      );
+    }
     // Run sync in background so refresh does not block UI (up to 90s); do not await
     unawaited((() async {
       final hasOffline = await LocationService.hasPendingOfflineData();

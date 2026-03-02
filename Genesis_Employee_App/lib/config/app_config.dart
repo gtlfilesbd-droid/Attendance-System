@@ -1,7 +1,14 @@
 class AppConfig {
-  // API Configuration - PC IP: 103.29.60.233 (Web PC where Django/Docker runs)
-  // Use 10.0.2.2 for Android Emulator, localhost for iOS Simulator
-  static const String baseUrl = 'http://103.29.60.233:8000/api';
+  /// Phase 6: API base URL is configurable at build time. Use HTTPS in production.
+  /// Default: current dev server. To use production HTTPS, build with:
+  ///   flutter build apk --dart-define=BASE_URL=https://your-domain.com/api
+  /// (No trailing slash after /api; endpoints are e.g. /employees/auth/login/.)
+  static const String baseUrl = String.fromEnvironment(
+    'BASE_URL',
+    defaultValue: 'http://103.29.60.233:8000/api',
+  );
+  /// True when base URL uses HTTPS (production-safe).
+  static bool get isSecureBaseUrl => baseUrl.startsWith('https://');
   
   // API Endpoints
   static const String loginEndpoint = '/employees/auth/login/';
@@ -15,7 +22,9 @@ class AppConfig {
   static const String endDutyEndpoint = '/attendance/end-duty/';
   static const String employeeProfileEndpoint = '/employees/me/';
   static const String registerDeviceEndpoint = '/employees/auth/register-device/';
-  
+  /// Phase 2: Mobile log bulk upload
+  static const String mobileLogsBulkEndpoint = '/audit/mobile-logs/bulk/';
+
   // Location Tracking Configuration
   static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)
   /// Interval in seconds when duty is active (Start Duty). Used when moving slowly / standing.
@@ -26,6 +35,14 @@ class AppConfig {
   static const int locationUpdateIntervalSecondsWhenMoving = 15;
   /// Speed above this (m/s) is treated as "moving" for adaptive interval. ~2 m/s ≈ 7.2 km/h.
   static const double speedThresholdMovingMps = 2.0;
+
+  /// Phase 5: Battery-aware interval tuning. When battery % <= this, use power-save intervals.
+  static const int batteryLowThresholdPercent = 20;
+  /// Interval (seconds) when duty + standing still and battery is low. Longer = less wake, better battery.
+  static const int locationUpdateIntervalSecondsWhenDutyPowerSave = 120;
+  /// Interval (seconds) when moving and battery is low.
+  static const int locationUpdateIntervalSecondsWhenMovingPowerSave = 30;
+
   /// Send immediately when displacement from last sent position exceeds this (meters).
   /// Reduces zigzag on map when driving; 30–50 m is a good range for vehicle.
   static const double minDisplacementToSendMeters = 30.0;

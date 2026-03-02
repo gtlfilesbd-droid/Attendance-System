@@ -1,9 +1,9 @@
 import 'dart:convert';
-import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import '../config/app_config.dart';
 import 'api_service.dart';
+import 'app_log_service.dart';
 import 'duty_reminder_service.dart';
 import 'push_notification_service.dart';
 
@@ -19,13 +19,11 @@ class AuthService {
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
-  /// Login with email and password
-  /// Uses ApiService to perform the network request
-  Future<bool> login(String email, String password) async {
+  /// Login with email and password.
+  /// Returns null on success, or error message String on failure (Phase 7: includes 429 throttle message).
+  Future<String?> login(String email, String password) async {
     try {
-      // Initialize ApiService if not already
       ApiService().initialize();
-      
       final response = await ApiService().login(email, password);
 
       if (response['success'] == true) {
@@ -34,18 +32,10 @@ class AuthService {
         final refresh = data['refresh'];
         final employee = data['employee'];
 
-        // Save tokens
         await _storage.write(key: AppConfig.tokenKey, value: access);
         await _storage.write(key: AppConfig.refreshTokenKey, value: refresh);
-        
-        // Save employee data
         if (employee != null) {
-          await _storage.write(
-            key: 'employee_data', 
-            value: jsonEncode(employee)
-          );
-          
-          // Also save specific fields if needed by AppConfig keys
+          await _storage.write(key: 'employee_data', value: jsonEncode(employee));
           if (employee['employee_id'] != null) {
             await _storage.write(key: AppConfig.employeeIdKey, value: employee['employee_id']);
           }
@@ -53,27 +43,27 @@ class AuthService {
             await _storage.write(key: AppConfig.employeeEmailKey, value: employee['email']);
           }
         }
-
-        // Register FCM token for duty reminder push (9:00 and 9:28)
         try {
           await PushNotificationService().registerFCMToken();
         } catch (_) {}
-
-        return true;
+        return null;
       }
-      return false;
+      return response['message'] as String? ?? 'Login failed';
     } catch (e) {
       print('Login error: $e');
-      return false;
+      return 'Connection error';
     }
   }
 
   /// Logout
-  /// Notifies backend (for audit log), then clears all stored data and stops location tracking
-  Future<void> logout() async {
-    // Notify backend first (token still in storage so request is authenticated)
+  /// [reason] e.g. TOKEN_REFRESH_FAILED, MANUAL_LOGOUT – sent to backend for audit (Phase 1).
+  /// Notifies backend (for audit log), then clears all stored data and stops location tracking.
+  Future<void> logout({String? reason}) async {
     try {
-      await ApiService().logout();
+      await AppLogService().info('SESSION', 'Logout reason=${reason ?? "unknown"}', extra: {'reason': reason});
+    } catch (_) {}
+    try {
+      await ApiService().logout(reason: reason);
     } catch (_) {
       // Proceed with local logout even if API call fails (e.g. offline)
     }

@@ -38,6 +38,7 @@ call flutter build apk --release
 if %ERRORLEVEL% equ 0 (
     echo.
     echo [OK] APK: build\app\outputs\flutter-apk\app-release.apk
+    echo For production HTTPS, run: flutter build apk --release --dart-define=BASE_URL=https://your-domain.com/api
 )
 goto end
 
@@ -55,6 +56,7 @@ if %ERRORLEVEL% equ 0 (
     echo.
     echo [OK] AAB: build\app\outputs\bundle\release\app-release.aab
     echo Upload this file to Google Play Console.
+    echo For production HTTPS, run: flutter build appbundle --release --dart-define=BASE_URL=https://your-domain.com/api
 )
 goto end
 

@@ -88,11 +88,8 @@ cd Genesis_Employee_App
 flutter pub get
 ```
 
-### 2. Configure API Endpoint
-Edit `lib/config/app_config.dart`:
-```dart
-static const String baseUrl = 'http://your-server:8000/api';
-```
+### 2. Configure API Endpoint (Phase 6)
+Default URL is in `lib/config/app_config.dart`. Override at build time with `--dart-define=BASE_URL=...`; use **HTTPS** for production, e.g. `flutter build apk --release --dart-define=BASE_URL=https://your-api.com/api`.
 
 ### 3. Run the App
 ```bash
@@ -133,7 +130,7 @@ flutter run
 
 ## ⚠️ Important Notes
 
-1. **API Configuration**: Update `lib/config/app_config.dart` with your Django backend URL
+1. **API Configuration**: Set base URL in `lib/config/app_config.dart` (default) or via `--dart-define=BASE_URL=...`; use HTTPS in production
 2. **Android Emulator**: Use `10.0.2.2` instead of `localhost` for API calls
 3. **iOS Simulator**: Use `localhost` for API calls
 4. **Physical Devices**: Use your computer's local IP address
@@ -142,8 +139,8 @@ flutter run
 
 ## 🎯 Integration with Django Backend
 
-The app is ready to integrate with your Django backend at:
-- Base URL: Configured in `lib/config/app_config.dart`
+The app is ready to integrate with your Django backend:
+- Base URL: `lib/config/app_config.dart` or build-time `BASE_URL`; use HTTPS in production
 - Authentication: JWT tokens via `/api/auth/token/`
 - Location Logging: `/api/tracking/log-location/`
 - Attendance: `/api/attendance/my-attendance/`

@@ -202,6 +202,8 @@ REST_FRAMEWORK = {
     'DEFAULT_THROTTLE_RATES': {
         'user': '120/minute',
         'anon': '60/minute',
+        'login': '10/minute',      # Phase 7: brute-force protection for employee login
+        'tracking': '200/minute',  # Phase 7: location/heartbeat so bulk sync is comfortable
     },
     'DATETIME_FORMAT': '%Y-%m-%d %H:%M:%S',
     'DATE_FORMAT': '%Y-%m-%d',

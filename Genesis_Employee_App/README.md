@@ -19,7 +19,7 @@ flutter pub get
 ```
    If that fails (network or timeout), run `pub-get.bat` from the app folder, or try again with a working internet connection. The app uses the `geocoding` package (^3.0.0) for current-location place names.
 
-2. Configure API endpoint in `lib/config/app_config.dart`
+2. Configure API endpoint: default in `lib/config/app_config.dart`, or at build time with `--dart-define=BASE_URL=https://your-api.com/api` (use HTTPS in production)
 
 3. Run the app:
 ```bash
@@ -40,8 +40,7 @@ flutter run
 
 ## API Integration
 
-The app connects to the Django backend at:
-- Base URL: `http://your-server:8000/api/`
+The app connects to the Django backend. Base URL is set in `lib/config/app_config.dart` (default) or via `--dart-define=BASE_URL=...` at build time; use **HTTPS** in production.
 
 ## Build & Release
 
