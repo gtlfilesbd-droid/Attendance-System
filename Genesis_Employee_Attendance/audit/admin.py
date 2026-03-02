@@ -52,7 +52,7 @@ class MobileLogAdmin(admin.ModelAdmin):
         'id', 'employee', 'timestamp', 'level', 'category', 'message_short',
         'device_brand', 'device_model', 'device_android_version', 'received_at',
     ]
-    list_filter = ['level', 'category', 'device_brand', 'device_android_version']
+    list_filter = ['employee', 'level', 'category', 'device_brand', 'device_android_version']
     search_fields = ['employee__name', 'employee__email', 'message']
     ordering = ['-timestamp']
     readonly_fields = [

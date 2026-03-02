@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
+import 'app_log_upload_service.dart';
 import 'location_service.dart';
 
 /// Result of a foreground refresh attempt.
@@ -14,6 +15,8 @@ enum ForegroundRefreshResult {
 /// Service that runs when the app returns to foreground: re-inits API, syncs
 /// offline data, and notifies registered screens to refresh. Uses debounce and
 /// connectivity check to avoid unnecessary API calls and handle offline.
+///
+/// Location sync, log upload, and attendance API are three separate flows; no shared queue.
 class ForegroundRefreshService {
   static final ForegroundRefreshService _instance =
       ForegroundRefreshService._internal();
@@ -93,9 +96,12 @@ class ForegroundRefreshService {
           : _listenerDelay;
 
       // Long background: skip immediate sync to avoid overloading UI; if pending offline data (e.g. from duty), sync after delay.
+      // Run location sync and log upload in parallel (no cross-blocking).
       if (!isLongBackground) {
         unawaited(LocationService.syncOfflineData());
+        unawaited(AppLogUploadService().uploadBatch());
       } else {
+        unawaited(AppLogUploadService().uploadBatch());
         unawaited((() async {
           if (await LocationService.hasPendingOfflineData()) {
             await Future.delayed(deferredSyncDelay);

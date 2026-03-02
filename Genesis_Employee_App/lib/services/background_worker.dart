@@ -141,8 +141,8 @@ class BackgroundWorker {
     double? lastSentLng;
     DateTime? lastSentTime;
     DateTime? lastHeartbeatTime;
-    // Phase 1: Watchdog – if no location/heartbeat sent for 5 min, stop service (app can restart on resume)
-    const int watchdogInactiveMinutes = 5;
+    // Phase 1: Watchdog – if no location/heartbeat sent for 15 min, stop service (app can restart on resume)
+    const int watchdogInactiveMinutes = 15;
 
     service.on('stopService').listen((event) {
       positionSubscription?.cancel();
@@ -242,7 +242,7 @@ class BackgroundWorker {
             } catch (_) {}
           }
 
-          // Phase 1 watchdog: if no location and no heartbeat sent for 5 min, stop service (app will restart on resume)
+          // Phase 1 watchdog: if no location and no heartbeat sent for 15 min, stop service (app will restart on resume)
           final lastActivity = (lastSentTime != null && lastHeartbeatTime != null)
               ? (lastSentTime!.isAfter(lastHeartbeatTime!) ? lastSentTime! : lastHeartbeatTime!)
               : null;

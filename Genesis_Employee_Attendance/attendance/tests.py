@@ -85,12 +85,12 @@ class DutySessionTest(TestCase):
 
 
 class AutoEndDutySessionsPhase1Test(TestCase):
-    """Phase 1: 30-min logic uses last_heartbeat_at; session not closed if heartbeat recent."""
+    """Phase 1: 60-min logic uses last_heartbeat_at; session not closed if heartbeat recent."""
 
     def setUp(self):
         self.employee = _create_employee(employee_id='EMP002')
         today = date.today()
-        # Session started 2 hours ago (so > 30 min ago)
+        # Session started 2 hours ago (so > 60 min ago)
         session_start = timezone.now() - timedelta(hours=2)
         if timezone.is_naive(session_start):
             session_start = timezone.make_aware(session_start, timezone.get_current_timezone())
@@ -106,7 +106,7 @@ class AutoEndDutySessionsPhase1Test(TestCase):
         self.assertIsNone(self.session.end_time)
 
     def test_heartbeat_recent_session_not_auto_closed(self):
-        """When last_heartbeat_at is within 35 min, session must NOT be auto-closed even with no LocationLog."""
+        """When last_heartbeat_at is within 65 min, session must NOT be auto-closed even with no LocationLog."""
         # No LocationLog for this employee in this session. But set recent heartbeat.
         self.employee.last_heartbeat_at = timezone.now() - timedelta(minutes=10)
         if timezone.is_naive(self.employee.last_heartbeat_at):
@@ -120,7 +120,7 @@ class AutoEndDutySessionsPhase1Test(TestCase):
         self.assertIn('Auto-closed 0', result)
 
     def test_no_heartbeat_no_location_session_auto_closed(self):
-        """When no heartbeat and no LocationLog in 35 min, session should be auto-closed."""
+        """When no heartbeat and no LocationLog in 65 min, session should be auto-closed."""
         self.employee.last_heartbeat_at = None
         self.employee.save(update_fields=['last_heartbeat_at'])
         result = auto_end_duty_sessions()

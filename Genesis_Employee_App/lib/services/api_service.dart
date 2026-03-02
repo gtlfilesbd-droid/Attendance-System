@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -54,7 +55,11 @@ class ApiService {
   }
 
   final Dio _dio = Dio();
-  
+
+  /// Single refresh lock: only one token refresh runs on 401; others wait on this completer then retry.
+  bool _isRefreshing = false;
+  Completer<void>? _refreshCompleter;
+
   void initialize() {
     _dio.interceptors.clear();
     _dio.options.baseUrl = AppConfig.baseUrl;
@@ -104,56 +109,73 @@ class ApiService {
             path.contains('/employees/auth/logout/');
 
         // Only handle 401 for non-auth endpoints to avoid infinite loops.
+        // Single refresh lock: first 401 triggers refresh; concurrent 401s wait on same refresh then retry.
         if (e.response?.statusCode == 401 && !isAuthPath) {
-          try {
-            // Attempt to refresh the token
-            final authService = AuthService();
-            final refreshed = await authService.refreshToken();
-            
-            if (refreshed) {
-              // Retry the original request with new token
-              final newToken = await authService.getToken();
-              if (newToken != null) {
-                // Update the request options with new token
-                e.requestOptions.headers['Authorization'] = 'Bearer $newToken';
-                
-                // Retry the request
-                final opts = Options(
-                  method: e.requestOptions.method,
-                  headers: e.requestOptions.headers,
-                  contentType: e.requestOptions.contentType,
-                  responseType: e.requestOptions.responseType,
-                );
-                
-                try {
-                  final cloneReq = await _dio.request(
-                    e.requestOptions.path,
-                    options: opts,
-                    data: e.requestOptions.data,
-                    queryParameters: e.requestOptions.queryParameters,
-                  );
-                  return handler.resolve(cloneReq);
-                } catch (retryError) {
-                  // If retry also fails, proceed with error
-                  return handler.next(e);
-                }
-              }
-            }
-            
-            // If refresh failed, log and logout (Phase 1 + 2)
+          final authService = AuthService();
+
+          Future<void> doRetryWithNewToken() async {
+            final newToken = await authService.getToken();
+            if (newToken == null) return;
+            e.requestOptions.headers['Authorization'] = 'Bearer $newToken';
+            final opts = Options(
+              method: e.requestOptions.method,
+              headers: e.requestOptions.headers,
+              contentType: e.requestOptions.contentType,
+              responseType: e.requestOptions.responseType,
+            );
             try {
-              await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
-            } catch (_) {}
-            await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
-            _navigateToLoginOnSessionExpired();
+              final cloneReq = await _dio.request(
+                e.requestOptions.path,
+                options: opts,
+                data: e.requestOptions.data,
+                queryParameters: e.requestOptions.queryParameters,
+              );
+              handler.resolve(cloneReq);
+            } catch (_) {
+              handler.next(e);
+            }
+          }
+
+          if (_isRefreshing && _refreshCompleter != null) {
+            try {
+              await _refreshCompleter!.future;
+              await doRetryWithNewToken();
+            } catch (_) {
+              handler.next(e);
+            }
+            return;
+          }
+
+          _isRefreshing = true;
+          _refreshCompleter = Completer<void>();
+          try {
+            final refreshed = await authService.refreshToken();
+            if (refreshed) {
+              _refreshCompleter!.complete();
+              await doRetryWithNewToken();
+            } else {
+              _refreshCompleter!.completeError(Exception('Token refresh failed'));
+              try {
+                await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
+              } catch (_) {}
+              await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
+              _navigateToLoginOnSessionExpired();
+              handler.next(e);
+            }
           } catch (refreshError) {
-            print('Token refresh failed: $refreshError');
+            _refreshCompleter!.completeError(refreshError);
+            if (kDebugMode) print('Token refresh failed: $refreshError');
             try {
               await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path}, stackTrace: refreshError.toString());
             } catch (_) {}
-            await AuthService().logout(reason: 'TOKEN_REFRESH_FAILED');
+            await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
             _navigateToLoginOnSessionExpired();
+            handler.next(e);
+          } finally {
+            _isRefreshing = false;
+            _refreshCompleter = null;
           }
+          return;
         }
         return handler.next(e);
       },

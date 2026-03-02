@@ -212,13 +212,13 @@ def auto_end_duty_sessions():
     Auto-end open duty sessions:
     1. Date change: session.date < today -> remark "Date changes."
     2. 9 hours active: duration >= 9h -> remark "9 hours active."
-    3. 30 min inactive: no LocationLog for employee in last 30 min -> remark "User kept mobile network turned off for 30 minutes."
+    3. 60 min inactive: no location nor heartbeat in last 60 min -> remark "User kept mobile network turned off for 60 minutes."
     """
     from tracking.models import LocationLog
 
     now = timezone.now()
     today = timezone.localdate()
-    cutoff_30min = now - timedelta(minutes=30)
+    cutoff_60min = now - timedelta(minutes=60)
     nine_hours_secs = 9 * 3600
 
     open_sessions = list(DutySession.objects.filter(end_time__isnull=True).select_related('employee'))
@@ -226,7 +226,7 @@ def auto_end_duty_sessions():
 
     for session in open_sessions:
         remark = None
-        auto_close_end_time = None  # For 30-min case: last location + 30 min (clamped to now)
+        auto_close_end_time = None  # For 60-min case: last activity + 60 min (clamped to now)
 
         # Normalize session start to timezone-aware for duration and LocationLog scope
         session_start = session.start_time
@@ -243,8 +243,8 @@ def auto_end_duty_sessions():
         elif remark is None and (now - session_start).total_seconds() >= nine_hours_secs:
             remark = "9 hours active."
 
-        # Priority 3: 30 min inactive – use BOTH last LocationLog AND last_heartbeat_at (Phase 1 fix)
-        # Only auto-end when neither location nor heartbeat in last 30 min (grace 35 min for heartbeat)
+        # Priority 3: 60 min inactive – use BOTH last LocationLog AND last_heartbeat_at (Phase 1 fix)
+        # Only auto-end when neither location nor heartbeat in last 60 min (grace 65 min for heartbeat)
         elif remark is None:
             last_log = (
                 LocationLog.objects.filter(
@@ -266,11 +266,11 @@ def auto_end_duty_sessions():
                 effective_last = last_log
             if last_heartbeat is not None and last_heartbeat > effective_last:
                 effective_last = last_heartbeat
-            grace_minutes = 35  # 30 + 5 min retry window
+            grace_minutes = 65  # 60 + 5 min retry window
             cutoff_grace = effective_last + timedelta(minutes=grace_minutes)
             if now > cutoff_grace:
-                remark = "User kept mobile network turned off for 30 minutes."
-                computed = effective_last + timedelta(minutes=30)
+                remark = "User kept mobile network turned off for 60 minutes."
+                computed = effective_last + timedelta(minutes=60)
                 auto_close_end_time = min(computed, now)
 
         if remark:

@@ -130,6 +130,7 @@ class LocationService {
           r == ConnectivityResult.mobile || r == ConnectivityResult.wifi || r == ConnectivityResult.ethernet);
       if (connected) {
         print('LocationService: Network restored – triggering sync');
+        // Location sync and log upload are separate flows; run in parallel, no shared queue.
         syncOfflineData();
         AppLogUploadService().uploadBatch();
       }

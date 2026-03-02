@@ -47,6 +47,7 @@ class AppLogService {
   }
 
   /// Log a message. [extra] can be Map or will be stringified. [stackTrace] optional.
+  /// In release builds, DEBUG level is not persisted to avoid log flood and storage pressure.
   Future<void> log(
     String level,
     String category,
@@ -55,6 +56,7 @@ class AppLogService {
     String? stackTrace,
     int? durationMs,
   }) async {
+    if (level == levelDebug && kReleaseMode) return;
     try {
       final device = await _getDeviceInfo();
       String? extraJson;
