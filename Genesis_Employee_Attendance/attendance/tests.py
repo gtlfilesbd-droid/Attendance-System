@@ -119,11 +119,11 @@ class AutoEndDutySessionsPhase1Test(TestCase):
         self.assertIsNone(self.session.end_time, 'Session should remain open when heartbeat is recent')
         self.assertIn('Auto-closed 0', result)
 
-    def test_no_heartbeat_no_location_session_auto_closed(self):
-        """When no heartbeat and no LocationLog in 65 min, session should be auto-closed."""
+    def test_no_heartbeat_no_location_session_not_auto_closed(self):
+        """60-min inactive rule is disabled: session stays open when no heartbeat and no LocationLog."""
         self.employee.last_heartbeat_at = None
         self.employee.save(update_fields=['last_heartbeat_at'])
         result = auto_end_duty_sessions()
         self.session.refresh_from_db()
-        self.assertIsNotNone(self.session.end_time, 'Session should be auto-closed when no activity')
-        self.assertIn('Auto-closed 1', result)
+        self.assertIsNone(self.session.end_time, 'Session should remain open (60-min rule disabled)')
+        self.assertIn('Auto-closed 0', result)

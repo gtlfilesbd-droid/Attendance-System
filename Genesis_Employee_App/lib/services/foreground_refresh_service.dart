@@ -3,6 +3,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
 import 'app_log_upload_service.dart';
+import 'auth_service.dart';
 import 'location_service.dart';
 
 /// Result of a foreground refresh attempt.
@@ -80,6 +81,13 @@ class ForegroundRefreshService {
     }
 
     if (!await _hasConnectivity()) {
+      return ForegroundRefreshResult.skippedOffline;
+    }
+
+    // Proactive token refresh so sync/upload and listener-triggered requests rarely hit 401.
+    final refreshResult = await AuthService().refreshToken();
+    if (refreshResult != RefreshResult.success) {
+      // Skip sync/upload this round; do not trigger logout. Interceptor will handle 401 if needed.
       return ForegroundRefreshResult.skippedOffline;
     }
 

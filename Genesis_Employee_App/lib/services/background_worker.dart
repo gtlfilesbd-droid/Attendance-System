@@ -140,8 +140,7 @@ class BackgroundWorker {
     double? lastSentLat;
     double? lastSentLng;
     DateTime? lastSentTime;
-    DateTime? lastHeartbeatTime;
-    // Phase 1: Watchdog – if no location/heartbeat sent for 15 min, stop service (app can restart on resume)
+    // Phase 1: Watchdog – if no location sent for 15 min, stop service (app will restart on resume). Heartbeat removed to reduce battery drain.
     const int watchdogInactiveMinutes = 15;
 
     service.on('stopService').listen((event) {
@@ -226,26 +225,8 @@ class BackgroundWorker {
             lastSentTime = now;
           }
 
-          // Heartbeat every 15 min for last_seen / offline detection (reuse batLevel from Phase 5).
-          final needHeartbeat = lastHeartbeatTime == null ||
-              now.difference(lastHeartbeatTime!).inMinutes >= 15;
-          if (needHeartbeat) {
-            try {
-              final sent = await ApiService().sendHeartbeat(
-                appVersion: AppConfig.appVersion,
-                batteryLevel: batLevel,
-                isTrackingEnabled: true,
-                latestLocationTimestamp: lastSentTime?.toIso8601String(),
-                deviceOs: 'Android',
-              );
-              if (sent) lastHeartbeatTime = now;
-            } catch (_) {}
-          }
-
-          // Phase 1 watchdog: if no location and no heartbeat sent for 15 min, stop service (app will restart on resume)
-          final lastActivity = (lastSentTime != null && lastHeartbeatTime != null)
-              ? (lastSentTime!.isAfter(lastHeartbeatTime!) ? lastSentTime! : lastHeartbeatTime!)
-              : null;
+          // Phase 1 watchdog: if no location sent for 15 min, stop service (app will restart on resume)
+          final lastActivity = lastSentTime;
           if (lastActivity != null &&
               now.difference(lastActivity).inMinutes >= watchdogInactiveMinutes) {
             print('BackgroundWorker: No activity for $watchdogInactiveMinutes min – stopping service (watchdog)');

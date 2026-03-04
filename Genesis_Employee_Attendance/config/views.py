@@ -37,7 +37,6 @@ def api_root(request, format=None):
             'tracking': {
                 'log_location': f'{base_url}/tracking/log-location/',
                 'log_location_bulk': f'{base_url}/tracking/log-location/bulk/',
-                'heartbeat': f'{base_url}/tracking/heartbeat/',
                 'live_locations': f'{base_url}/tracking/live-locations/',
                 'my_route_today': f'{base_url}/tracking/my-route-today/',
                 'employee_route': f'{base_url}/tracking/employee-route/',

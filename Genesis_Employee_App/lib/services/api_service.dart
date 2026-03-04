@@ -6,6 +6,13 @@ import '../config/app_config.dart';
 import 'app_log_service.dart';
 import 'auth_service.dart';
 
+/// Backoff delays for refresh retries when result is networkOrTransientError.
+const List<Duration> _refreshBackoffDelays = [
+  Duration(seconds: 2),
+  Duration(seconds: 5),
+  Duration(seconds: 10),
+];
+
 /// Route API response: locations list and optional distance in km from backend.
 class RouteResponse {
   final List<dynamic> locations;
@@ -78,6 +85,7 @@ class ApiService {
           final token = await AuthService().getToken();
           if (token != null) {
             options.headers['Authorization'] = 'Bearer $token';
+            options.extra['_hadAuth'] = true;
           }
         }
         
@@ -109,8 +117,11 @@ class ApiService {
             path.contains('/employees/auth/logout/');
 
         // Only handle 401 for non-auth endpoints to avoid infinite loops.
-        // Single refresh lock: first 401 triggers refresh; concurrent 401s wait on same refresh then retry.
+        // Do not refresh/logout when the request had no credentials (e.g. background isolate) – just pass the error.
         if (e.response?.statusCode == 401 && !isAuthPath) {
+          if (e.requestOptions.extra['_hadAuth'] != true) {
+            return handler.next(e);
+          }
           final authService = AuthService();
 
           Future<void> doRetryWithNewToken() async {
@@ -148,43 +159,41 @@ class ApiService {
 
           _isRefreshing = true;
           _refreshCompleter = Completer<void>();
+          Future<void> doLogout() async {
+            try {
+              await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
+            } catch (_) {}
+            await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
+            _navigateToLoginOnSessionExpired();
+          }
+
           try {
-            bool refreshed = await authService.refreshToken();
-            if (!refreshed) {
-              // Retry once after short delay (e.g. network glitch) so user is not logged out unnecessarily
-              await Future.delayed(const Duration(seconds: 2));
-              refreshed = await authService.refreshToken();
+            RefreshResult result = await authService.refreshToken();
+            int attempt = 1;
+            while (result == RefreshResult.networkOrTransientError &&
+                attempt <= _refreshBackoffDelays.length) {
+              await Future.delayed(_refreshBackoffDelays[attempt - 1]);
+              result = await authService.refreshToken();
+              attempt++;
             }
-            if (refreshed) {
-              _refreshCompleter!.complete();
+
+            if (result == RefreshResult.success) {
+              if (!_refreshCompleter!.isCompleted) _refreshCompleter!.complete();
               await doRetryWithNewToken();
+            } else if (result == RefreshResult.invalidToken) {
+              if (!_refreshCompleter!.isCompleted) _refreshCompleter!.completeError(Exception('Token refresh failed'));
+              await doLogout();
+              handler.next(e);
             } else {
-              _refreshCompleter!.completeError(Exception('Token refresh failed'));
-              try {
-                await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
-              } catch (_) {}
-              await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
-              _navigateToLoginOnSessionExpired();
+              if (!_refreshCompleter!.isCompleted) _refreshCompleter!.completeError(Exception('Token refresh failed'));
               handler.next(e);
             }
           } catch (refreshError) {
-            // Retry once before giving up (e.g. temporary network failure)
-            try {
-              await Future.delayed(const Duration(seconds: 2));
-              final retried = await authService.refreshToken();
-              if (retried) {
-                _refreshCompleter!.complete();
-                await doRetryWithNewToken();
-                return;
-              }
-            } catch (_) {}
-            _refreshCompleter!.completeError(refreshError);
+            if (!_refreshCompleter!.isCompleted) _refreshCompleter!.completeError(refreshError);
             if (kDebugMode) print('Token refresh failed: $refreshError');
             try {
               await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path}, stackTrace: refreshError.toString());
             } catch (_) {}
-            await authService.logout(reason: 'TOKEN_REFRESH_FAILED');
-            _navigateToLoginOnSessionExpired();
             handler.next(e);
           } finally {
             _isRefreshing = false;

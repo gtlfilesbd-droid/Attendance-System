@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import '../config/app_config.dart';
@@ -6,6 +7,13 @@ import 'api_service.dart';
 import 'app_log_service.dart';
 import 'duty_reminder_service.dart';
 import 'push_notification_service.dart';
+
+/// Result of a token refresh attempt. Used to decide whether to logout or retry.
+enum RefreshResult {
+  success,
+  invalidToken,
+  networkOrTransientError,
+}
 
 class AuthService {
   // Singleton pattern
@@ -117,17 +125,18 @@ class AuthService {
     return await _storage.read(key: AppConfig.refreshTokenKey);
   }
 
-  /// Refresh access token using refresh token
-  Future<bool> refreshToken() async {
+  /// Refresh access token using refresh token.
+  /// Returns [RefreshResult.success] on 200 with access token;
+  /// [RefreshResult.invalidToken] on 401/4xx (refresh token expired or invalid);
+  /// [RefreshResult.networkOrTransientError] on timeout, connection error, or 5xx.
+  Future<RefreshResult> refreshToken() async {
     try {
       final refreshToken = await getRefreshToken();
-      if (refreshToken == null) {
-        return false;
+      if (refreshToken == null || refreshToken.isEmpty) {
+        return RefreshResult.invalidToken;
       }
 
-      // Initialize ApiService if not already
       ApiService().initialize();
-      
       final dio = ApiService().client;
       final response = await dio.post(
         AppConfig.tokenRefreshEndpoint,
@@ -137,21 +146,26 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = response.data;
         final access = data['access'];
-        
-        // Save new access token
         if (access != null) {
-          await _storage.write(key: AppConfig.tokenKey, value: access);
-          // Refresh token might also be updated
+          await _storage.write(key: AppConfig.tokenKey, value: access.toString());
           if (data['refresh'] != null) {
-            await _storage.write(key: AppConfig.refreshTokenKey, value: data['refresh']);
+            await _storage.write(key: AppConfig.refreshTokenKey, value: data['refresh'].toString());
           }
-          return true;
+          return RefreshResult.success;
         }
       }
-      return false;
+      // Non-200 success path (e.g. missing access in body)
+      return RefreshResult.invalidToken;
+    } on DioException catch (e) {
+      print('Token refresh error: $e');
+      final status = e.response?.statusCode;
+      if (status != null && status >= 400 && status < 500) {
+        return RefreshResult.invalidToken;
+      }
+      return RefreshResult.networkOrTransientError;
     } catch (e) {
       print('Token refresh error: $e');
-      return false;
+      return RefreshResult.networkOrTransientError;
     }
   }
 }

@@ -303,50 +303,6 @@ def log_location(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-@throttle_classes([TrackingRateThrottle])
-def heartbeat(request):
-    """
-    Heartbeat for last_seen and offline detection.
-    POST /api/tracking/heartbeat/
-    Body: { "device_id": "...", "app_version": "...", "battery_level": 87,
-            "is_tracking_enabled": true, "latest_location_timestamp": "2024-01-15T10:30:00Z" }
-    """
-    from employees.models import Employee
-
-    user = request.user
-    if not isinstance(user, Employee):
-        return Response(
-            {'success': False, 'message': 'Not an employee account. Use employee JWT.'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    now = timezone.now()
-    data = request.data or {}
-    update_fields = ['last_seen_at', 'last_heartbeat_at']
-    user.last_seen_at = now
-    user.last_heartbeat_at = now
-
-    latest_ts = data.get('latest_location_timestamp')
-    if latest_ts:
-        try:
-            ts_str = latest_ts.replace('Z', '+00:00')
-            user.last_location_at = datetime.fromisoformat(ts_str)
-            if user.last_location_at.tzinfo is None:
-                user.last_location_at = timezone.make_aware(user.last_location_at)
-            update_fields.append('last_location_at')
-        except Exception:
-            pass
-    device_os = data.get('device_os') or data.get('device_id')
-    if device_os:
-        user.last_device_os = str(device_os)[:50]
-        update_fields.append('last_device_os')
-
-    user.save(update_fields=update_fields)
-    return Response({'success': True}, status=status.HTTP_200_OK)
-
-
 def _log_location_single(employee, data):
     """Validate and save one location payload; used by log_location and log_location_bulk."""
     payload = data.copy()

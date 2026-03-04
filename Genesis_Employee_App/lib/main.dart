@@ -190,6 +190,15 @@ class _SplashScreenState extends State<SplashScreen> {
     ]);
     final isLoggedIn = await _authService.isLoggedIn();
 
+    // Proactive token refresh before Home so first API calls rarely hit 401 (e.g. after app kill).
+    if (isLoggedIn) {
+      var result = await _authService.refreshToken();
+      if (result != RefreshResult.success) {
+        await Future.delayed(const Duration(seconds: 2));
+        await _authService.refreshToken();
+      }
+    }
+
     if (mounted) {
       Navigator.pushReplacement(
         context,

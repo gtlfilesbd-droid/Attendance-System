@@ -310,6 +310,12 @@ class LocationService {
         return;
       }
 
+      final token = await AuthService().getToken();
+      if (token == null || token.isEmpty) {
+        _syncInProgress = false;
+        return;
+      }
+
       print("FLUTTER_BG_SERVICE: Syncing ${offlineData.length} offline records...");
       final stopAt = DateTime.now().add(maxSyncDuration);
       List<String> remainingData = List<String>.from(offlineData);
