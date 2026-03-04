@@ -175,10 +175,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     await _authService.logout(reason: 'MANUAL_LOGOUT');
-    rootNavigatorKey?.currentState?.pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => const LoginScreen()),
-      (route) => false,
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      rootNavigatorKey?.currentState?.pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
+    });
   }
 
   @override
