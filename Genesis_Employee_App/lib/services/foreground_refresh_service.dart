@@ -10,7 +10,10 @@ import 'location_service.dart';
 enum ForegroundRefreshResult {
   refreshed,
   skippedDebounce,
+  /// No connectivity (show "No internet").
   skippedOffline,
+  /// Connectivity OK but token refresh failed (transient/API); do not show "No internet".
+  skippedTransient,
 }
 
 /// Service that runs when the app returns to foreground: re-inits API, syncs
@@ -35,6 +38,8 @@ class ForegroundRefreshService {
   static const Duration longBackgroundThreshold = Duration(minutes: 5);
   /// Delay before starting sync when long background + pending offline data (so first paint/tap are not blocked).
   static const Duration deferredSyncDelay = Duration(seconds: 3);
+  /// Delay before retrying connectivity check on resume (avoids fake offline right after returning from background).
+  static const Duration _resumeConnectivityRetryDelay = Duration(milliseconds: 500);
   final List<VoidCallback> _listeners = [];
   bool _refreshing = false;
 
@@ -80,15 +85,23 @@ class ForegroundRefreshService {
       return ForegroundRefreshResult.skippedDebounce;
     }
 
+    // Retry once after delay to avoid fake offline when OS reports stale state right after resume.
     if (!await _hasConnectivity()) {
-      return ForegroundRefreshResult.skippedOffline;
+      await Future.delayed(_resumeConnectivityRetryDelay);
+      if (!await _hasConnectivity()) {
+        return ForegroundRefreshResult.skippedOffline;
+      }
     }
 
     // Proactive token refresh so sync/upload and listener-triggered requests rarely hit 401.
-    final refreshResult = await AuthService().refreshToken();
+    var refreshResult = await AuthService().refreshToken();
+    if (refreshResult == RefreshResult.networkOrTransientError) {
+      await Future.delayed(_resumeConnectivityRetryDelay);
+      refreshResult = await AuthService().refreshToken();
+    }
     if (refreshResult != RefreshResult.success) {
-      // Skip sync/upload this round; do not trigger logout. Interceptor will handle 401 if needed.
-      return ForegroundRefreshResult.skippedOffline;
+      // Do not show "No internet" – may be transient or invalid token; interceptor handles 401.
+      return ForegroundRefreshResult.skippedTransient;
     }
 
     _refreshing = true;

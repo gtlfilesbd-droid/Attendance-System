@@ -103,6 +103,7 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
 
     final result = await ForegroundRefreshService().onAppResumed();
     if (!mounted) return;
+    // Only show "No internet" when we actually detected no connectivity; not on token refresh failure.
     if (result == ForegroundRefreshResult.skippedOffline) {
       _scaffoldKey.currentState?.showSnackBar(
         const SnackBar(
