@@ -175,7 +175,7 @@ def end_duty(request):
     """
     End the current duty session. Records end time and location.
     POST /api/attendance/end-duty/
-    Body: latitude, longitude, optional address.
+    Body: latitude, longitude, optional address, optional remarks (or end_reason).
     """
     user = request.user
     employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
@@ -212,7 +212,8 @@ def end_duty(request):
     session.end_latitude = lat
     session.end_longitude = lon
     session.end_address = get_display_address(lat, lon) or None
-    session.remarks = "User End this session"
+    remarks_input = (request.data.get('remarks') or request.data.get('end_reason')) or ''
+    session.remarks = remarks_input.strip() if isinstance(remarks_input, str) and remarks_input.strip() else "User End this session"
     secs = calculate_duration_seconds(session.start_time, session.end_time)
     session.total_hours = Decimal(secs) / Decimal(3600)
     session.save()

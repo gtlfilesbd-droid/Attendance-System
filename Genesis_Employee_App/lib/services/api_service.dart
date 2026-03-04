@@ -149,7 +149,12 @@ class ApiService {
           _isRefreshing = true;
           _refreshCompleter = Completer<void>();
           try {
-            final refreshed = await authService.refreshToken();
+            bool refreshed = await authService.refreshToken();
+            if (!refreshed) {
+              // Retry once after short delay (e.g. network glitch) so user is not logged out unnecessarily
+              await Future.delayed(const Duration(seconds: 2));
+              refreshed = await authService.refreshToken();
+            }
             if (refreshed) {
               _refreshCompleter!.complete();
               await doRetryWithNewToken();
@@ -163,6 +168,16 @@ class ApiService {
               handler.next(e);
             }
           } catch (refreshError) {
+            // Retry once before giving up (e.g. temporary network failure)
+            try {
+              await Future.delayed(const Duration(seconds: 2));
+              final retried = await authService.refreshToken();
+              if (retried) {
+                _refreshCompleter!.complete();
+                await doRetryWithNewToken();
+                return;
+              }
+            } catch (_) {}
             _refreshCompleter!.completeError(refreshError);
             if (kDebugMode) print('Token refresh failed: $refreshError');
             try {
@@ -225,15 +240,38 @@ class ApiService {
         };
       }
     } on DioException catch (e) {
+      // Handle throttling (too many login attempts) with a clear message.
       if (e.response?.statusCode == 429) {
-        final msg = e.response?.data is Map && e.response?.data['detail'] != null
-            ? e.response!.data['detail'].toString()
+        final data = e.response?.data;
+        final detail = data is Map && data['detail'] != null
+            ? data['detail'].toString()
+            : null;
+        final msg = (detail != null && detail.isNotEmpty)
+            ? detail
             : 'Too many attempts. Please try again in a minute.';
-        return {'success': false, 'message': msg.isNotEmpty ? msg : 'Too many attempts. Please try again in a minute.'};
+        return {'success': false, 'message': msg};
       }
+
+      // For other errors, be defensive about response shape (could be JSON, plain text, or HTML).
+      String msg = 'Connection error';
+      final data = e.response?.data;
+      if (data is Map) {
+        if (data['message'] != null) {
+          msg = data['message'].toString();
+        } else if (data['detail'] != null) {
+          msg = data['detail'].toString();
+        }
+      } else if (data is String && data.isNotEmpty) {
+        // HTML or plaintext error from server – avoid crashing on indexing and show generic server error.
+        final code = e.response?.statusCode;
+        msg = code != null
+            ? 'Server error ($code). Please contact admin.'
+            : 'Server error. Please contact admin.';
+      }
+
       return {
         'success': false,
-        'message': e.response?.data['message'] ?? 'Connection error',
+        'message': msg,
       };
     } catch (e) {
       return {
@@ -558,10 +596,12 @@ class ApiService {
 
   /// End Duty - record end time and location
   /// POST /attendance/end-duty/
+  /// Optional [remarks] is stored in DutySession.remarks (e.g. "Ended via logout" for admin).
   Future<bool> endDuty({
     required double latitude,
     required double longitude,
     String? address,
+    String? remarks,
   }) async {
     try {
       final payload = <String, dynamic>{
@@ -569,6 +609,7 @@ class ApiService {
         'longitude': longitude,
       };
       if (address != null && address.isNotEmpty) payload['address'] = address;
+      if (remarks != null && remarks.isNotEmpty) payload['remarks'] = remarks;
       final response = await _dio.post(
         AppConfig.endDutyEndpoint,
         data: payload,

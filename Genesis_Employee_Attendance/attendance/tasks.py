@@ -213,6 +213,7 @@ def auto_end_duty_sessions():
     1. Date change: session.date < today -> remark "Date changes."
     2. 9 hours active: duration >= 9h -> remark "9 hours active."
     3. 60 min inactive: no location nor heartbeat in last 60 min -> remark "User kept mobile network turned off for 60 minutes."
+       (Temporarily disabled as per deployment decision; only 1 & 2 are active.)
     """
     from tracking.models import LocationLog
 
@@ -243,35 +244,10 @@ def auto_end_duty_sessions():
         elif remark is None and (now - session_start).total_seconds() >= nine_hours_secs:
             remark = "9 hours active."
 
-        # Priority 3: 60 min inactive – use BOTH last LocationLog AND last_heartbeat_at (Phase 1 fix)
-        # Only auto-end when neither location nor heartbeat in last 60 min (grace 65 min for heartbeat)
-        elif remark is None:
-            last_log = (
-                LocationLog.objects.filter(
-                    employee=session.employee,
-                    timestamp__gte=session_start,
-                )
-                .order_by('-timestamp')
-                .values_list('timestamp', flat=True)
-                .first()
-            )
-            if last_log is not None and timezone.is_naive(last_log):
-                last_log = timezone.make_aware(last_log, timezone.get_current_timezone())
-            last_heartbeat = getattr(session.employee, 'last_heartbeat_at', None)
-            if last_heartbeat is not None and timezone.is_naive(last_heartbeat):
-                last_heartbeat = timezone.make_aware(last_heartbeat, timezone.get_current_timezone())
-            # Effective last activity = max(location, heartbeat, session_start)
-            effective_last = session_start
-            if last_log is not None and last_log > effective_last:
-                effective_last = last_log
-            if last_heartbeat is not None and last_heartbeat > effective_last:
-                effective_last = last_heartbeat
-            grace_minutes = 65  # 60 + 5 min retry window
-            cutoff_grace = effective_last + timedelta(minutes=grace_minutes)
-            if now > cutoff_grace:
-                remark = "User kept mobile network turned off for 60 minutes."
-                computed = effective_last + timedelta(minutes=60)
-                auto_close_end_time = min(computed, now)
+        # Priority 3 (60 min inactive) temporarily disabled:
+        # Previously: if no LocationLog and no heartbeat in last 60 min (with 5 min grace),
+        # auto-close with remark "User kept mobile network turned off for 60 minutes."
+        # Deployment decision: keep sessions open in this case; only date-change and 9h rules apply.
 
         if remark:
             last_log_obj = (

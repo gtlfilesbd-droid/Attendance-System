@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'app_navigator.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'services/auth_service.dart';
@@ -46,6 +47,7 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
   @override
   void initState() {
     super.initState();
+    rootNavigatorKey = _navigatorKey;
     WidgetsBinding.instance.addObserver(this);
     ApiService.onSessionExpired = _navigateToLogin;
     WidgetsBinding.instance.addPostFrameCallback((_) => _runInitAfterFirstFrame());

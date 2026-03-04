@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
+import '../app_navigator.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/foreground_refresh_service.dart';
+import '../services/location_service.dart';
 import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -62,14 +66,119 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await _loadProfile();
   }
 
-  Future<void> _logout() async {
-    await _authService.logout(reason: 'MANUAL_LOGOUT');
-    if (mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false,
-      );
+  static const Duration _positionTimeout = Duration(seconds: 15);
+
+  /// Returns true if there is an open duty session for today in [result].
+  bool _hasOpenSessionToday(Map<String, dynamic> result) {
+    final now = DateTime.now();
+    final todayStr = DateFormat('yyyy-MM-dd').format(now);
+    final byDate = result['by_date'] as List<dynamic>?;
+    if (byDate == null || byDate.isEmpty) return false;
+    for (final entry in byDate) {
+      final map = entry as Map<String, dynamic>?;
+      if (map == null) continue;
+      final dateStr = map['date'] as String?;
+      if (dateStr != todayStr) continue;
+      final sessions = map['sessions'] as List<dynamic>?;
+      if (sessions == null) continue;
+      for (final s in sessions) {
+        final sess = s as Map<String, dynamic>?;
+        if (sess == null) continue;
+        final endTime = sess['end_time'];
+        if (endTime == null || endTime.toString().isEmpty) return true;
+      }
+      break;
     }
+    return false;
+  }
+
+  Future<Position?> _getPositionForDuty() async {
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(_positionTimeout);
+    } on TimeoutException {
+      try {
+        return await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.medium,
+        ).timeout(_positionTimeout);
+      } on TimeoutException {
+        return null;
+      }
+    }
+  }
+
+  Future<void> _logout() async {
+    final now = DateTime.now();
+    final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+    final tomorrowStr = DateFormat('yyyy-MM-dd').format(now.add(const Duration(days: 1)));
+    final result = await ApiService().getMyAttendance(startDate: yesterdayStr, endDate: tomorrowStr);
+    final hasOpenDuty = _hasOpenSessionToday(result);
+
+    if (hasOpenDuty) {
+      if (mounted && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("You're on duty. Ending duty first, then logging out."),
+          ),
+        );
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => const AlertDialog(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                SizedBox(width: 20),
+                Expanded(child: Text('Ending duty…')),
+              ],
+            ),
+          ),
+        );
+      }
+      final position = await _getPositionForDuty();
+      if (position == null) {
+        if (mounted && context.mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not get location. Check connection and try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      final success = await ApiService().endDuty(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        remarks: 'Ended via logout',
+      );
+      if (mounted && context.mounted) Navigator.of(context).pop();
+      if (!success) {
+        if (mounted && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not end duty. Check connection and try again.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+      await LocationService().stopTracking();
+      await LocationService.clearLastSentLocation();
+    }
+
+    await _authService.logout(reason: 'MANUAL_LOGOUT');
+    rootNavigatorKey?.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   @override
