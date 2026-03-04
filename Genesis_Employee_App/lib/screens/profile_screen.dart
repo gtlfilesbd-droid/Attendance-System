@@ -175,12 +175,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     await _authService.logout(reason: 'MANUAL_LOGOUT');
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // Retry navigation at different times (some real devices e.g. TECNO need navigator to be ready later).
+    void goToLogin() {
       rootNavigatorKey?.currentState?.pushAndRemoveUntil(
         MaterialPageRoute(builder: (context) => const LoginScreen()),
         (route) => false,
       );
-    });
+    }
+    Future.delayed(const Duration(milliseconds: 50), goToLogin);
+    Future.delayed(const Duration(milliseconds: 200), goToLogin);
+    Future.delayed(const Duration(milliseconds: 500), goToLogin);
   }
 
   @override
