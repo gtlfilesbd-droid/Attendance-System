@@ -12,7 +12,7 @@ NOTE: Process-local; each web/Celery worker maintains its own state.
 
 
 class SimpleCircuitBreaker:
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: int = 60):
+    def __init__(self, failure_threshold: int = 10, recovery_timeout: int = 60):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self._failure_count = 0

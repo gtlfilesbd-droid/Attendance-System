@@ -436,42 +436,61 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _fetchCurrentPlaceName() async {
     if (_isRefreshingLocation) return;
-    if (mounted) {
-      setState(() => _isRefreshingLocation = true);
-    }
+    if (mounted) setState(() => _isRefreshingLocation = true);
+
+    Position? position;
     try {
-      final position = await Geolocator.getCurrentPosition(
+      position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-      );
-      // Prefer backend resolve-address (same format as dashboard marker popup)
+      ).timeout(const Duration(seconds: 15));
+    } catch (_) {
+      if (mounted) setState(() => _isRefreshingLocation = false);
+      // GPS fail — keep previous name unchanged
+      return;
+    }
+
+    // Step 1: Backend (preferred – same as dashboard marker popup)
+    try {
       final resolved = await ApiService().resolveAddress(
         position.latitude,
         position.longitude,
       );
-      if (resolved != null && resolved.isNotEmpty && !_isCoordinatesOnly(resolved) && mounted) {
+      if (resolved != null &&
+          resolved.isNotEmpty &&
+          !_isCoordinatesOnly(resolved) &&
+          mounted) {
         setState(() {
           _currentPlaceName = resolved;
           _isRefreshingLocation = false;
         });
         return;
       }
-      // Run Nominatim HTTP + parse off main isolate to avoid UI jank
+    } catch (_) {}
+
+    // Step 2: Nominatim direct (off main isolate)
+    try {
       final lat = position.latitude;
       final lng = position.longitude;
-      final nominatimName = await Isolate.run(() => _nominatimReverseGeocode(lat, lng));
-      if (nominatimName != null && nominatimName.isNotEmpty && mounted) {
+      final nominatimName =
+          await Isolate.run(() => _nominatimReverseGeocode(lat, lng));
+      if (nominatimName != null &&
+          nominatimName.isNotEmpty &&
+          mounted) {
         setState(() {
           _currentPlaceName = nominatimName;
           _isRefreshingLocation = false;
         });
         return;
       }
-      // Fall back to platform geocoding (runs on main isolate)
+    } catch (_) {}
+
+    // Step 3: Android/iOS platform geocoder
+    try {
       final placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
       );
-      String placeName = '—';
+      String placeName = _currentPlaceName.isEmpty ? '—' : _currentPlaceName;
       if (placemarks.isNotEmpty) {
         final p = placemarks.first;
         final subLocality = p.subLocality?.trim() ?? '';
@@ -482,15 +501,21 @@ class _HomeScreenState extends State<HomeScreen> {
         final admin = p.administrativeArea?.trim() ?? '';
 
         if (subLocality.isNotEmpty) {
-          placeName = locality.isNotEmpty && locality != subLocality && !locality.toLowerCase().contains(subLocality.toLowerCase())
+          placeName = locality.isNotEmpty &&
+                  locality != subLocality &&
+                  !locality
+                      .toLowerCase()
+                      .contains(subLocality.toLowerCase())
               ? '$subLocality, $locality'
               : subLocality;
         } else if (name.isNotEmpty && name != locality && name != admin) {
           placeName = locality.isNotEmpty ? '$name, $locality' : name;
         } else if (thoroughfare.isNotEmpty) {
-          placeName = locality.isNotEmpty ? '$thoroughfare, $locality' : thoroughfare;
+          placeName =
+              locality.isNotEmpty ? '$thoroughfare, $locality' : thoroughfare;
         } else if (locality.isNotEmpty) {
-          placeName = admin.isNotEmpty && admin != locality ? '$locality, $admin' : locality;
+          placeName =
+              admin.isNotEmpty && admin != locality ? '$locality, $admin' : locality;
         } else if (subAdmin.isNotEmpty) {
           placeName = subAdmin;
         } else if (admin.isNotEmpty) {
@@ -503,13 +528,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _isRefreshingLocation = false;
         });
       }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _currentPlaceName = 'Location unavailable';
-          _isRefreshingLocation = false;
-        });
-      }
+      return;
+    } catch (_) {}
+
+    // All failed but GPS worked — keep previous name (or '—')
+    if (mounted) {
+      setState(() {
+        _isRefreshingLocation = false;
+      });
     }
   }
 

@@ -113,8 +113,11 @@ def _reverse_geocode_photon(lat, lon):
                 'lon': lon,
                 'lat': lat,
             })
-            req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            req = urllib.request.Request(
+                url,
+                headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'},
+            )
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode())
             features = data.get('features') if isinstance(data, dict) else None
             if not features or not isinstance(features, list):
@@ -177,6 +180,59 @@ def get_display_address(lat, lon):
     return f'{float(lat):.5f}, {float(lon):.5f}'
 
 
+def _get_cached_address_from_db(lat, lon, radius_m=100):
+    """
+    Find nearest saved address from LocationLog (and duty sessions) within radius_m meters.
+    Used as a fallback when external geocoders (Nominatim/Photon) are unavailable or rate-limited.
+    """
+    try:
+        from django.contrib.gis.geos import Point
+        from django.contrib.gis.measure import D
+    except Exception:
+        # GIS not available – skip DB lookup
+        return None
+
+    try:
+        point = Point(lon, lat, srid=4326)
+    except Exception:
+        return None
+
+    # Nearest LocationLog with a non-empty human-readable address
+    try:
+        log_addr = (
+            LocationLog.objects
+            .filter(location__distance_lte=(point, D(m=radius_m)))
+            .exclude(address__isnull=True)
+            .exclude(address='')
+            .order_by('location__distance')
+            .values_list('address', flat=True)
+            .first()
+        )
+        if log_addr and not _is_coordinates_only(log_addr):
+            return log_addr
+    except Exception as e:
+        logger.debug('get_cached_address_from_db: LocationLog lookup failed: %s', e)
+
+    # Also try duty session start/end addresses (non-GIS, approximate match on date/employee not needed here)
+    try:
+        from attendance.models import DutySession
+        # Simple numeric distance filter using lat/lon deltas (~1 degree ≈ 111km)
+        delta_deg = radius_m / 111_000.0
+        qs = DutySession.objects.filter(
+            start_latitude__gte=lat - delta_deg,
+            start_latitude__lte=lat + delta_deg,
+            start_longitude__gte=lon - delta_deg,
+            start_longitude__lte=lon + delta_deg,
+        ).exclude(start_address__isnull=True).exclude(start_address='')
+        sess_addr = qs.values_list('start_address', flat=True).first()
+        if sess_addr and not _is_coordinates_only(str(sess_addr)):
+            return str(sess_addr)
+    except Exception as e:
+        logger.debug('get_cached_address_from_db: DutySession lookup failed: %s', e)
+
+    return None
+
+
 def _get_time_ago(timestamp):
     """Return human-readable time ago string for a timestamp."""
     diff = timezone.now() - timestamp
@@ -222,7 +278,16 @@ def resolve_address(request):
             {'success': False, 'message': 'lat and lon must be numbers'},
             status=status.HTTP_400_BAD_REQUEST
         )
+
+    # Primary: external geocoders (Nominatim/Photon) via get_display_address
     address = get_display_address(lat_f, lon_f)
+
+    # Fallback: if geocoders failed or only coordinates returned, use cached DB address
+    if not address or _is_coordinates_only(address):
+        cached = _get_cached_address_from_db(lat_f, lon_f, radius_m=100)
+        if cached and not _is_coordinates_only(cached):
+            address = cached
+
     if address and _is_coordinates_only(address):
         address = ''
     return Response({'success': True, 'address': address or ''})
