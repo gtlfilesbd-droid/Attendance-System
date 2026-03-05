@@ -223,6 +223,8 @@ def resolve_address(request):
             status=status.HTTP_400_BAD_REQUEST
         )
     address = get_display_address(lat_f, lon_f)
+    if address and _is_coordinates_only(address):
+        address = ''
     return Response({'success': True, 'address': address or ''})
 
 
@@ -303,8 +305,9 @@ def log_location(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
-def _log_location_single(employee, data):
-    """Validate and save one location payload; used by log_location and log_location_bulk."""
+def _log_location_single(employee, data, skip_geocode=False):
+    """Validate and save one location payload; used by log_location and log_location_bulk.
+    skip_geocode=True for bulk/offline sync to avoid Nominatim rate limits."""
     payload = data.copy()
     if 'employee' not in payload or not payload['employee']:
         payload['employee'] = str(employee.id)
@@ -312,7 +315,7 @@ def _log_location_single(employee, data):
     if not serializer.is_valid():
         return None, serializer.errors
     location_log = serializer.save()
-    if not (location_log.address and location_log.address.strip()):
+    if not skip_geocode and not (location_log.address and location_log.address.strip()):
         addr = get_display_address(location_log.latitude, location_log.longitude)
         if addr and not _is_coordinates_only(addr):
             location_log.address = addr
@@ -354,7 +357,7 @@ def log_location_bulk(request):
         payload = dict(item)
         if 'employee' not in payload or not payload['employee']:
             payload['employee'] = str(user.id)
-        loc, err = _log_location_single(user, payload)
+        loc, err = _log_location_single(user, payload, skip_geocode=True)
         if err:
             errors.append({'index': idx, 'errors': err})
         else:
@@ -425,10 +428,8 @@ def live_locations(request):
                         location.save(update_fields=['address'])
                 except Exception as e:
                     logger.warning('live_locations geocode for employee %s: %s', getattr(employee, 'id'), e)
-                if not address:
-                    lat, lng = location.latitude, location.longitude
-                    if lat is not None and lng is not None:
-                        address = f'{float(lat):.5f}, {float(lng):.5f}'
+                if not address or _is_coordinates_only(address):
+                    address = '—'
                 locations.append({
                     'employee_id': str(employee.id),
                     'employee_name': employee.name,

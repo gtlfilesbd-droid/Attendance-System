@@ -93,6 +93,20 @@ Future<String?> _nominatimReverseGeocode(double latitude, double longitude) asyn
   }
 }
 
+/// True if [s] looks like "23.83780, 90.37219" (coordinates only, not a real address).
+bool _isCoordinatesOnly(String? s) {
+  if (s == null || s.isEmpty) return false;
+  final parts = s.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+  if (parts.length != 2) return false;
+  try {
+    final a = double.tryParse(parts[0]);
+    final b = double.tryParse(parts[1]);
+    return a != null && b != null;
+  } catch (_) {
+    return false;
+  }
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -434,7 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
         position.latitude,
         position.longitude,
       );
-      if (resolved != null && resolved.isNotEmpty && mounted) {
+      if (resolved != null && resolved.isNotEmpty && !_isCoordinatesOnly(resolved) && mounted) {
         setState(() {
           _currentPlaceName = resolved;
           _isRefreshingLocation = false;
