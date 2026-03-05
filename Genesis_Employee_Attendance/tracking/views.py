@@ -199,12 +199,14 @@ def _get_cached_address_from_db(lat, lon, radius_m=100):
 
     # Nearest LocationLog with a non-empty human-readable address
     try:
+        from django.contrib.gis.db.models.functions import Distance
         log_addr = (
             LocationLog.objects
             .filter(location__distance_lte=(point, D(m=radius_m)))
             .exclude(address__isnull=True)
             .exclude(address='')
-            .order_by('location__distance')
+            .annotate(dist=Distance('location', point))
+            .order_by('dist')
             .values_list('address', flat=True)
             .first()
         )
