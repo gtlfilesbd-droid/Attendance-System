@@ -32,6 +32,7 @@
     <application
         android:label="Genesis"
         android:name="${applicationName}"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/launcher_icon"
         android:enableOnBackInvokedCallback="true">
         

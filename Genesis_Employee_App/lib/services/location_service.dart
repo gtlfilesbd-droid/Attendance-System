@@ -166,6 +166,9 @@ class LocationService {
       final batteryLevel = await battery.batteryLevel;
       final timestamp = DateTime.now().toIso8601String();
 
+      // In background isolate, FlutterSecureStorage may be unavailable due to
+      // multi-engine plugin channel conflict. AuthService.getToken() already
+      // falls back to SharedPreferences, so this call works in both isolates.
       final token = await AuthService().getToken();
       if (token == null || token.isEmpty) {
         print('FLUTTER_BG_SERVICE: ERROR No auth token found - cannot send location');

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import 'api_service.dart';
 import 'app_log_service.dart';
@@ -27,6 +28,12 @@ class AuthService {
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
+  /// SharedPreferences key for background-isolate-readable token backup.
+  /// Background Flutter engines cannot reliably access FlutterSecureStorage
+  /// (plugin channel conflict in multi-engine setup), so we keep a plain-prefs
+  /// copy that both the main and background isolates can read.
+  static const String _bgTokenKey = 'bg_auth_token';
+
   /// Login with email and password.
   /// Returns null on success, or error message String on failure (Phase 7: includes 429 throttle message).
   Future<String?> login(String email, String password) async {
@@ -42,6 +49,11 @@ class AuthService {
 
         await _storage.write(key: AppConfig.tokenKey, value: access);
         await _storage.write(key: AppConfig.refreshTokenKey, value: refresh);
+        // Also persist token in SharedPreferences so the background isolate can read it.
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_bgTokenKey, access as String);
+        } catch (_) {}
         if (employee != null) {
           await _storage.write(key: 'employee_data', value: jsonEncode(employee));
           if (employee['employee_id'] != null) {
@@ -75,8 +87,12 @@ class AuthService {
     } catch (_) {
       // Proceed with local logout even if API call fails (e.g. offline)
     }
-    // Clear secure storage
+    // Clear secure storage and SharedPreferences token backup
     await _storage.deleteAll();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_bgTokenKey);
+    } catch (_) {}
     
     // Stop background location service
     final service = FlutterBackgroundService();
@@ -89,13 +105,25 @@ class AuthService {
 
   /// Check if user is logged in
   Future<bool> isLoggedIn() async {
-    final token = await _storage.read(key: AppConfig.tokenKey);
+    final token = await getToken();
     return token != null;
   }
 
-  /// Get stored JWT token
+  /// Get stored JWT token.
+  /// Falls back to SharedPreferences when FlutterSecureStorage returns null
+  /// (e.g. background isolate plugin-channel conflict after multi-engine start).
   Future<String?> getToken() async {
-    return await _storage.read(key: AppConfig.tokenKey);
+    try {
+      final token = await _storage.read(key: AppConfig.tokenKey);
+      if (token != null && token.isNotEmpty) return token;
+    } catch (_) {}
+    // Fallback: SharedPreferences copy (reliable across isolates)
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bg = prefs.getString(_bgTokenKey);
+      if (bg != null && bg.isNotEmpty) return bg;
+    } catch (_) {}
+    return null;
   }
 
   /// Update stored employee data (e.g. after fetching fresh profile from GET /me/).
@@ -151,6 +179,11 @@ class AuthService {
           if (data['refresh'] != null) {
             await _storage.write(key: AppConfig.refreshTokenKey, value: data['refresh'].toString());
           }
+          // Keep SharedPreferences copy in sync
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_bgTokenKey, access.toString());
+          } catch (_) {}
           return RefreshResult.success;
         }
       }
