@@ -17,7 +17,6 @@ import '../services/api_service.dart';
 import '../services/foreground_refresh_service.dart';
 import '../services/push_notification_service.dart';
 import 'attendance_screen.dart';
-import 'route_map_screen.dart';
 import 'profile_screen.dart';
 
 /// Nominatim reverse geocode: returns short address string or null on failure.
@@ -1023,43 +1022,18 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildQuickActionCards(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: _buildActionButton(
-              context,
-              title: 'View My\nAttendance',
-              subtitle: 'View sessions',
-              icon: Icons.calendar_today_outlined,
-              color: colorScheme.primary,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AttendanceScreen()),
-                );
-              },
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: _buildActionButton(
-              context,
-              title: "View Route",
-              subtitle: "Select date to view",
-              icon: Icons.route_outlined,
-              color: Colors.orange.shade700,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const RouteMapScreen()),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+    return _buildActionButton(
+      context,
+      title: 'View My Attendance',
+      subtitle: 'View sessions',
+      icon: Icons.calendar_today_outlined,
+      color: colorScheme.primary,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const AttendanceScreen()),
+        );
+      },
     );
   }
 

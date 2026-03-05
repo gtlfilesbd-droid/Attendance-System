@@ -36,8 +36,6 @@ dependencies:
   device_info_plus: ^10.1.2
 
   # UI
-  flutter_map: ^6.1.0
-  latlong2: ^0.9.0
   intl: ^0.18.1
 
   # Utils
