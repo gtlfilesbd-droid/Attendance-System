@@ -174,17 +174,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await LocationService.clearLastSentLocation();
     }
 
-    await _authService.logout(reason: 'MANUAL_LOGOUT');
-    // Retry navigation at different times (some real devices e.g. TECNO need navigator to be ready later).
-    void goToLogin() {
-      rootNavigatorKey?.currentState?.pushAndRemoveUntil(
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-        (route) => false,
-      );
+    try {
+      await _authService.logout(reason: 'MANUAL_LOGOUT');
+    } catch (_) {
+      // Cleanup may fail on some real devices; still navigate to login
     }
-    Future.delayed(const Duration(milliseconds: 50), goToLogin);
-    Future.delayed(const Duration(milliseconds: 200), goToLogin);
-    Future.delayed(const Duration(milliseconds: 500), goToLogin);
+    rootNavigatorKey?.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   @override

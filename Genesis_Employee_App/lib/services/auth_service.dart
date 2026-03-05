@@ -88,19 +88,29 @@ class AuthService {
       // Proceed with local logout even if API call fails (e.g. offline)
     }
     // Clear secure storage and SharedPreferences token backup
-    await _storage.deleteAll();
+    try {
+      await _storage.deleteAll();
+    } catch (_) {
+      // Proceed even if secure storage fails (e.g. Keystore issues on some real devices)
+    }
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_bgTokenKey);
     } catch (_) {}
     
     // Stop background location service
-    final service = FlutterBackgroundService();
-    if (await service.isRunning()) {
-      service.invoke("stopService");
+    try {
+      final service = FlutterBackgroundService();
+      if (await service.isRunning()) {
+        service.invoke("stopService");
+      }
+    } catch (_) {
+      // Proceed even if service check/invoke fails on some devices
     }
     // Cancel scheduled duty reminders
-    await DutyReminderService().cancelAll();
+    try {
+      await DutyReminderService().cancelAll();
+    } catch (_) {}
   }
 
   /// Check if user is logged in
