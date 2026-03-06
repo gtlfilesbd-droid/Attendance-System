@@ -152,11 +152,15 @@ class BackgroundWorker {
       service.stopSelf();
     });
 
+    // Battery level cache: re-read at most every 3 minutes to avoid IPC on every tick.
+    int cachedBatLevel = 100;
+    DateTime? lastBatReadTime;
+
     // Start position stream for live updates when moving (like Google Maps)
     positionSubscription = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 0,
+        distanceFilter: 10,
       ),
     ).listen((Position position) {
       cachedPosition = position;
@@ -185,6 +189,13 @@ class BackgroundWorker {
               now.month != serviceStartDate.month ||
               now.year != serviceStartDate.year) {
             print('BackgroundWorker: Date changed – auto-stopping service');
+            service.invoke('stopService');
+            return;
+          }
+          if (now.difference(serviceStartDate).inHours >=
+              AppConfig.maxDutyDurationHours) {
+            print(
+                'BackgroundWorker: Max duty duration (${AppConfig.maxDutyDurationHours}h) reached – auto-stopping');
             service.invoke('stopService');
             return;
           }
@@ -217,7 +228,13 @@ class BackgroundWorker {
           }
 
           // Phase 5: Battery-aware interval – use longer intervals when battery is low.
-          final int batLevel = await battery.batteryLevel;
+          // Re-read battery at most every 3 minutes to avoid repeated IPC calls.
+          if (lastBatReadTime == null ||
+              now.difference(lastBatReadTime!).inSeconds >= 180) {
+            cachedBatLevel = await battery.batteryLevel;
+            lastBatReadTime = now;
+          }
+          final int batLevel = cachedBatLevel;
           final bool powerSave = batLevel <= AppConfig.batteryLowThresholdPercent;
           final int intervalWhenDuty = powerSave
               ? AppConfig.locationUpdateIntervalSecondsWhenDutyPowerSave

@@ -119,15 +119,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final LocationService _locationService = LocationService();
 
   bool _isTracking = false;
-  String _currentTime = '';
   String _currentPlaceName = '—';
   String _employeeName = '';
   String? _profilePictureUrl;
   DateTime? _dutyStartTime;
-  String _liveDutyDuration = '0h 0m 0s';
   int _todayBaseSeconds = 0;
   DateTime _todayDate = DateTime(1970, 1, 1);
-  Timer? _timer;
   Timer? _placeRefreshTimer;
   int _loadTodayDutyTimeGeneration = 0;
   /// Set when getMyAttendance fails so duty time card can show error + retry.
@@ -148,7 +145,6 @@ class _HomeScreenState extends State<HomeScreen> {
     PushNotificationService().registerFCMToken();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (mounted) {
-        _startTimer();
         // Load duty state first; then start or stop tracking based on open session (enterprise: single source of truth from backend)
         await _loadTodayDutyTime();
         if (!mounted) return;
@@ -178,7 +174,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     ForegroundRefreshService().removeListener(_onForegroundRefresh);
-    _timer?.cancel();
     _placeRefreshTimer?.cancel();
     super.dispose();
   }
@@ -204,52 +199,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _startTimer() {
-    _updateTime();
-    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      _updateTime();
-    });
-  }
-
   static String _greeting() {
     final hour = DateTime.now().hour;
     if (hour < 12) return 'Good morning';
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
-  }
-
-  static String _formatDurationHMS(int totalSeconds) {
-    if (totalSeconds < 0) return '0h 0m 0s';
-    final h = totalSeconds ~/ 3600;
-    final m = (totalSeconds % 3600) ~/ 60;
-    final s = totalSeconds % 60;
-    return '${h}h ${m}m ${s}s';
-  }
-
-  void _updateTime() {
-    if (!mounted || !context.mounted) return;
-    final now = DateTime.now();
-    final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
-    // Date change: refetch today's duty for new date
-    if (now.year != _todayDate.year ||
-        now.month != _todayDate.month ||
-        now.day != _todayDate.day) {
-      _loadTodayDutyTime();
-      return;
-    }
-    int totalSeconds = _todayBaseSeconds;
-    if (_dutyStartTime != null) {
-      final liveSeconds = now.difference(_dutyStartTime!).inSeconds;
-      if (liveSeconds > 0) totalSeconds += liveSeconds;
-      if (totalSeconds < 0) totalSeconds = 0;
-    }
-    final liveDuration = _formatDurationHMS(totalSeconds);
-    setState(() {
-      _currentTime = use24
-          ? DateFormat('HH:mm:ss').format(now)
-          : DateFormat('hh:mm:ss a').format(now);
-      _liveDutyDuration = liveDuration;
-    });
   }
 
   Future<void> _loadData() async {
@@ -446,10 +400,13 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_isRefreshingLocation) return;
     if (mounted) setState(() => _isRefreshingLocation = true);
 
+    // Prefer the last known OS-cached position (no GPS hardware activation needed).
+    // Only fall back to a fresh fix if no cached position is available.
     Position? position;
     try {
-      position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+      position = await Geolocator.getLastKnownPosition();
+      position ??= await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
       ).timeout(const Duration(seconds: 15));
     } catch (_) {
       if (mounted) setState(() => _isRefreshingLocation = false);
@@ -573,7 +530,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final service = FlutterBackgroundService();
     final onDuty = _dutyStartTime != null;
-    final isRunning = await service.isRunning();
 
     bool dialogShown = false;
     try {
@@ -625,11 +581,6 @@ class _HomeScreenState extends State<HomeScreen> {
               _dutyStartTime = null;
             });
             await _loadTodayDutyTime();
-            if (mounted) {
-              setState(() {
-                _liveDutyDuration = _formatDurationHMS(_todayBaseSeconds);
-              });
-            }
           }
         } else if (!hadException && mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -900,15 +851,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            Text(
-              _currentTime,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: colorScheme.onSurface,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
+            const _ClockText(),
             const SizedBox(height: 10),
             Text(
               DateFormat('EEEE, d MMM yyyy').format(DateTime.now()),
@@ -1131,14 +1074,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              _liveDutyDuration.isEmpty ? '0h 0m 0s' : _liveDutyDuration,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontSize: 36,
-                fontWeight: FontWeight.bold,
-                color: colorScheme.primary,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
+            _LiveDutyDuration(
+              dutyStartTime: _dutyStartTime,
+              todayBaseSeconds: _todayBaseSeconds,
+              todayDate: _todayDate,
+              onDateChange: _loadTodayDutyTime,
             ),
             if (_dutyTimeLoadError != null) ...[
               const SizedBox(height: 12),
@@ -1228,6 +1168,122 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Displays the current time, updating only itself every second.
+/// Isolating this widget prevents the entire HomeScreen from rebuilding
+/// on every tick.
+class _ClockText extends StatefulWidget {
+  const _ClockText();
+
+  @override
+  State<_ClockText> createState() => _ClockTextState();
+}
+
+class _ClockTextState extends State<_ClockText> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final use24 = MediaQuery.of(context).alwaysUse24HourFormat;
+    final now = DateTime.now();
+    final time = use24
+        ? DateFormat('HH:mm:ss').format(now)
+        : DateFormat('hh:mm:ss a').format(now);
+    final theme = Theme.of(context);
+    return Text(
+      time,
+      style: theme.textTheme.headlineMedium?.copyWith(
+        fontSize: 32,
+        fontWeight: FontWeight.bold,
+        color: theme.colorScheme.onSurface,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+/// Displays the live duty duration, updating only itself every second.
+/// Calls [onDateChange] when the calendar date rolls over midnight so the
+/// parent can reload today's duty data.
+class _LiveDutyDuration extends StatefulWidget {
+  final DateTime? dutyStartTime;
+  final int todayBaseSeconds;
+  final DateTime todayDate;
+  final VoidCallback onDateChange;
+
+  const _LiveDutyDuration({
+    required this.dutyStartTime,
+    required this.todayBaseSeconds,
+    required this.todayDate,
+    required this.onDateChange,
+  });
+
+  @override
+  State<_LiveDutyDuration> createState() => _LiveDutyDurationState();
+}
+
+class _LiveDutyDurationState extends State<_LiveDutyDuration> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final now = DateTime.now();
+      if (now.day != widget.todayDate.day ||
+          now.month != widget.todayDate.month ||
+          now.year != widget.todayDate.year) {
+        widget.onDateChange();
+        return;
+      }
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    int totalSeconds = widget.todayBaseSeconds;
+    if (widget.dutyStartTime != null) {
+      final live = DateTime.now().difference(widget.dutyStartTime!).inSeconds;
+      if (live > 0) totalSeconds += live;
+      if (totalSeconds < 0) totalSeconds = 0;
+    }
+    final h = totalSeconds ~/ 3600;
+    final m = (totalSeconds % 3600) ~/ 60;
+    final s = totalSeconds % 60;
+    final theme = Theme.of(context);
+    return Text(
+      '${h}h ${m}m ${s}s',
+      style: theme.textTheme.headlineMedium?.copyWith(
+        fontSize: 36,
+        fontWeight: FontWeight.bold,
+        color: theme.colorScheme.primary,
+        fontFeatures: const [FontFeature.tabularFigures()],
       ),
     );
   }

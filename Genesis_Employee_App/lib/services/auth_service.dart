@@ -111,6 +111,10 @@ class AuthService {
     try {
       await DutyReminderService().cancelAll();
     } catch (_) {}
+    // Cancel FCM listeners so subscriptions are not leaked across sessions
+    try {
+      PushNotificationService.cancelListeners();
+    } catch (_) {}
   }
 
   /// Check if user is logged in

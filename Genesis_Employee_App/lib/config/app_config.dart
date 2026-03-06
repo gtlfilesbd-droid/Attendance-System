@@ -62,6 +62,11 @@ class AppConfig {
   /// Ensures last known position is sent after a timeout even if the user has not moved.
   static const int maxIntervalWhenStillSeconds = 300;
 
+  /// Safety cap: auto-stop the background service if duty has been continuously
+  /// running for this many hours. Backend already auto-ends sessions at 9h;
+  /// this cap acts as an offline fallback in case the server is unreachable.
+  static const int maxDutyDurationHours = 10;
+
   // Storage Keys
   static const String tokenKey = 'auth_token';
   static const String refreshTokenKey = 'refresh_token';

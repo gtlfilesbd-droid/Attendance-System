@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -26,6 +27,8 @@ class PushNotificationService {
   static bool _initialized = false;
   static final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
+  static StreamSubscription<RemoteMessage>? _onMessageSub;
+  static StreamSubscription<String>? _onTokenRefreshSub;
 
   /// Initialize Firebase. Call from main() before runApp.
   static Future<void> initialize() async {
@@ -53,7 +56,7 @@ class PushNotificationService {
     }
 
     // Show notification when app is in foreground (FCM does not auto-show)
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    _onMessageSub = FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final notif = message.notification;
       if (notif != null && Platform.isAndroid) {
         _localNotifications.show(
@@ -68,9 +71,18 @@ class PushNotificationService {
     _initialized = true;
 
     // Listen for token refresh (e.g. app reinstall) and re-register
-    FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
+    _onTokenRefreshSub = FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
       _registerTokenWithBackend(newToken);
     });
+  }
+
+  /// Cancel FCM listeners. Call on logout so subscriptions are not leaked.
+  static void cancelListeners() {
+    _onMessageSub?.cancel();
+    _onTokenRefreshSub?.cancel();
+    _onMessageSub = null;
+    _onTokenRefreshSub = null;
+    _initialized = false;
   }
 
   /// Get FCM token and register with backend. Call after successful login.

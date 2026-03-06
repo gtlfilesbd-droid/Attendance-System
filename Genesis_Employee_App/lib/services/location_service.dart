@@ -103,6 +103,7 @@ class LocationService {
       "periodic_tracking_check",
       "check_tracking_schedule",
       frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
