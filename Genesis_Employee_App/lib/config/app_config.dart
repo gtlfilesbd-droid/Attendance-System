@@ -20,6 +20,7 @@ class AppConfig {
   static const String myAttendanceEndpoint = '/attendance/my-attendance/';
   static const String startDutyEndpoint = '/attendance/start-duty/';
   static const String endDutyEndpoint = '/attendance/end-duty/';
+  static const String activeSessionEndpoint = '/attendance/active-session/';
   static const String employeeProfileEndpoint = '/employees/me/';
   static const String registerDeviceEndpoint = '/employees/auth/register-device/';
   /// Phase 2: Mobile log bulk upload

@@ -119,9 +119,12 @@ class BackgroundWorker {
 
     // Re-initialize API Service in background isolate
     ApiService().initialize();
-    
+
     final Battery battery = Battery();
-    
+    final DateTime serviceStartDate = DateTime.now();
+    int sessionCheckTickCount = 0;
+    const int sessionCheckIntervalTicks = 8; // every 8 * 15s = 2 min
+
     if (service is AndroidServiceInstance) {
       service.on('setAsForeground').listen((event) {
         service.setAsForegroundService();
@@ -177,13 +180,30 @@ class BackgroundWorker {
         }
 
         try {
+          final now = DateTime.now();
+          if (now.day != serviceStartDate.day ||
+              now.month != serviceStartDate.month ||
+              now.year != serviceStartDate.year) {
+            print('BackgroundWorker: Date changed – auto-stopping service');
+            service.invoke('stopService');
+            return;
+          }
+          sessionCheckTickCount++;
+          if (sessionCheckTickCount >= sessionCheckIntervalTicks) {
+            sessionCheckTickCount = 0;
+            final bool? hasActive = await ApiService().hasActiveDutySession();
+            if (hasActive == false) {
+              print('BackgroundWorker: No active duty session on server – auto-stopping service');
+              service.invoke('stopService');
+              return;
+            }
+          }
           Position? position = cachedPosition;
           position ??= await Geolocator.getCurrentPosition(
             desiredAccuracy: LocationAccuracy.high,
           );
           // ignore: unnecessary_null_comparison - position can be null if getCurrentPosition failed
           if (position == null) return;
-          final now = DateTime.now();
           final bool neverSent = lastSentLat == null || lastSentLng == null || lastSentTime == null;
           double displacementMeters = double.infinity;
           if (!neverSent && lastSentLat != null && lastSentLng != null) {

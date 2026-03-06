@@ -232,6 +232,22 @@ def end_duty(request):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+def active_session_status(request):
+    """
+    Lightweight check for background service: does the current user have an open duty session?
+    GET /api/attendance/active-session/
+    Returns { "active": true|false }
+    """
+    user = request.user
+    employee = user if isinstance(user, Employee) else getattr(user, 'employee', None)
+    if not employee:
+        return Response({'active': False}, status=status.HTTP_200_OK)
+    has_open = DutySession.objects.filter(employee=employee, end_time__isnull=True).exists()
+    return Response({'active': has_open}, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def my_attendance(request):
     """
     Get employee's own attendance records

@@ -364,9 +364,17 @@ class _HomeScreenState extends State<HomeScreen> {
       _todayDate = DateTime(now.year, now.month, now.day);
       if (openSessionStart != null) {
         _dutyStartTime = openSessionStart;
+      } else {
+        _dutyStartTime = null;
       }
     });
     await _checkServiceStatus();
+    // If server says no active session (e.g. auto-end at midnight or 9h) but tracking is still running, stop it.
+    if (mounted && _dutyStartTime == null && _isTracking) {
+      await _locationService.stopTracking();
+      await LocationService.clearLastSentLocation();
+      if (mounted) await _checkServiceStatus();
+    }
   }
 
   static const Duration _serviceStatusCheckTimeout = Duration(seconds: 5);

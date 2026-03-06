@@ -538,6 +538,23 @@ class ApiService {
     }
   }
 
+  /// Check if current user has an active duty session (for background service).
+  /// GET /attendance/active-session/ → { "active": true|false }
+  /// Returns null on network/auth error so caller can skip stop (fail-open).
+  Future<bool?> hasActiveDutySession() async {
+    try {
+      final response = await _dio.get(AppConfig.activeSessionEndpoint);
+      if (response.statusCode == 200 && response.data is Map) {
+        final data = response.data as Map<String, dynamic>;
+        final active = data['active'];
+        if (active is bool) return active;
+      }
+      return false;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Get My Attendance
   /// GET /attendance/my-attendance/?start_date=X&end_date=Y
   /// Retries up to 2 times with 2s delay on failure before returning error.

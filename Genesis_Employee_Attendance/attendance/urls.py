@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     my_attendance, all_attendance, attendance_report, clear_my_data,
-    start_duty, end_duty, AttendanceViewSet
+    start_duty, end_duty, active_session_status, AttendanceViewSet
 )
 
 router = DefaultRouter()
@@ -12,6 +12,7 @@ urlpatterns = [
     # Duty session endpoints
     path('start-duty/', start_duty, name='start-duty'),
     path('end-duty/', end_duty, name='end-duty'),
+    path('active-session/', active_session_status, name='active-session'),
     # Attendance query endpoints
     path('my-attendance/', my_attendance, name='my-attendance'),
     path('clear-my-data/', clear_my_data, name='clear-my-data'),

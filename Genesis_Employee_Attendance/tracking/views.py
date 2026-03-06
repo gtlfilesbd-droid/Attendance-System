@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.db.models import Max, Sum
 from datetime import datetime, timedelta, time
 from attendance.utils import calculate_duration_seconds
+from attendance.models import DutySession
 from .models import LocationLog
 from .serializers import (
     LocationLogSerializer, LocationCreateSerializer, RouteHistorySerializer
@@ -335,6 +336,20 @@ def log_location(request):
         data = request.data.copy()
         if 'employee' not in data or not data['employee']:
             data['employee'] = str(request.user.id)
+
+        employee = request.user
+        active_session = DutySession.objects.filter(
+            employee=employee,
+            end_time__isnull=True,
+        ).exists()
+        if not active_session:
+            return Response(
+                {
+                    'success': False,
+                    'message': 'No active duty session. Location not recorded.',
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         serializer = LocationCreateSerializer(data=data)
 
