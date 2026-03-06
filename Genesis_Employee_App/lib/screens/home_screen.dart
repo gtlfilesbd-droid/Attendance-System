@@ -401,10 +401,17 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) setState(() => _isRefreshingLocation = true);
 
     // Prefer the last known OS-cached position (no GPS hardware activation needed).
-    // Only fall back to a fresh fix if no cached position is available.
+    // Discard cached position if older than 30 minutes — use a fresh fix instead.
+    // Fall back to fresh fix if no cached position is available at all.
     Position? position;
     try {
-      position = await Geolocator.getLastKnownPosition();
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        final age = DateTime.now().difference(lastKnown.timestamp);
+        if (age.inMinutes <= AppConfig.lastKnownPositionMaxAgeMinutes) {
+          position = lastKnown;
+        }
+      }
       position ??= await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.medium,
       ).timeout(const Duration(seconds: 15));

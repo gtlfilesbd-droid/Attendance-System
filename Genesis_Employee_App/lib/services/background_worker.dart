@@ -123,7 +123,10 @@ class BackgroundWorker {
     final Battery battery = Battery();
     final DateTime serviceStartDate = DateTime.now();
     int sessionCheckTickCount = 0;
-    const int sessionCheckIntervalTicks = 8; // every 8 * 15s = 2 min
+    const int checkIntervalSeconds = 15;
+    // Derive session-check tick count from AppConfig so it is tunable in one place.
+    const int sessionCheckIntervalTicks =
+        (AppConfig.sessionCheckIntervalMinutes * 60) ~/ checkIntervalSeconds;
 
     if (service is AndroidServiceInstance) {
       service.on('setAsForeground').listen((event) {
@@ -146,6 +149,27 @@ class BackgroundWorker {
     // Phase 1: Watchdog – if no location sent for 15 min, stop service (app will restart on resume). Heartbeat removed to reduce battery drain.
     const int watchdogInactiveMinutes = 15;
 
+    // Adaptive distanceFilter state
+    bool isStationaryMode = false;
+    DateTime lastPositionTime = DateTime.now();
+
+    // Restarts the GPS stream with the given distanceFilter.
+    // Called on service start and whenever stationary/moving mode switches.
+    void restartPositionStream(int filterMeters) {
+      positionSubscription?.cancel();
+      positionSubscription = Geolocator.getPositionStream(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: filterMeters,
+        ),
+      ).listen((Position position) {
+        cachedPosition = position;
+        lastPositionTime = DateTime.now();
+      }, onError: (e) {
+        print('BackgroundWorker: Position stream error $e');
+      });
+    }
+
     service.on('stopService').listen((event) {
       positionSubscription?.cancel();
       sendTimer?.cancel();
@@ -156,20 +180,10 @@ class BackgroundWorker {
     int cachedBatLevel = 100;
     DateTime? lastBatReadTime;
 
-    // Start position stream for live updates when moving (like Google Maps)
-    positionSubscription = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.high,
-        distanceFilter: 10,
-      ),
-    ).listen((Position position) {
-      cachedPosition = position;
-    }, onError: (e) {
-      print('BackgroundWorker: Position stream error $e');
-    });
+    // Start position stream in moving mode.
+    restartPositionStream(AppConfig.distanceFilterMovingMeters);
 
     // Adaptive send: check every 15s; send if displacement >= 30m OR time since last >= interval (15s when moving, 60s when still)
-    const int checkIntervalSeconds = 15;
     sendTimer = Timer.periodic(
       const Duration(seconds: checkIntervalSeconds),
       (timer) async {
@@ -199,6 +213,25 @@ class BackgroundWorker {
             service.invoke('stopService');
             return;
           }
+          // Adaptive distanceFilter: switch GPS stream mode based on movement.
+          final int minutesSinceLastPosition =
+              now.difference(lastPositionTime).inMinutes;
+          if (!isStationaryMode &&
+              minutesSinceLastPosition >=
+                  AppConfig.stationaryThresholdMinutes) {
+            isStationaryMode = true;
+            restartPositionStream(AppConfig.distanceFilterStationaryMeters);
+            print(
+                'BackgroundWorker: Stationary detected – GPS distanceFilter → ${AppConfig.distanceFilterStationaryMeters}m');
+          } else if (isStationaryMode &&
+              minutesSinceLastPosition <
+                  AppConfig.stationaryThresholdMinutes) {
+            isStationaryMode = false;
+            restartPositionStream(AppConfig.distanceFilterMovingMeters);
+            print(
+                'BackgroundWorker: Movement detected – GPS distanceFilter → ${AppConfig.distanceFilterMovingMeters}m');
+          }
+
           sessionCheckTickCount++;
           if (sessionCheckTickCount >= sessionCheckIntervalTicks) {
             sessionCheckTickCount = 0;

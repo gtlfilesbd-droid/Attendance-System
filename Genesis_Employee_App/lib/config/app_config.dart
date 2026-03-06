@@ -67,6 +67,26 @@ class AppConfig {
   /// this cap acts as an offline fallback in case the server is unreachable.
   static const int maxDutyDurationHours = 10;
 
+  /// Adaptive GPS distanceFilter (metres) when the user is actively moving.
+  static const int distanceFilterMovingMeters = 10;
+
+  /// Adaptive GPS distanceFilter (metres) when the user has been stationary.
+  /// Larger value lets the GPS hardware sleep longer between wake-ups.
+  static const int distanceFilterStationaryMeters = 50;
+
+  /// Minutes without significant movement before switching to the stationary
+  /// GPS filter. Must be > 0.
+  static const int stationaryThresholdMinutes = 5;
+
+  /// How often (in minutes) the background service checks the server for an
+  /// active duty session. Lower = faster auto-stop when server ends session;
+  /// higher = fewer network requests and less radio wake-up.
+  static const int sessionCheckIntervalMinutes = 5;
+
+  /// Maximum age (in minutes) of a cached GPS position used for place name
+  /// display on the home screen. Positions older than this trigger a fresh fix.
+  static const int lastKnownPositionMaxAgeMinutes = 30;
+
   // Storage Keys
   static const String tokenKey = 'auth_token';
   static const String refreshTokenKey = 'refresh_token';
