@@ -390,6 +390,29 @@ def log_location(request):
 def _log_location_single(employee, data, skip_geocode=False):
     """Validate and save one location payload; used by log_location and log_location_bulk.
     skip_geocode=True for bulk/offline sync to avoid Nominatim rate limits."""
+    from django.utils.dateparse import parse_datetime as _parse_dt
+    timestamp_str = data.get('timestamp')
+    if timestamp_str:
+        try:
+            ts = _parse_dt(str(timestamp_str))
+            if ts is not None:
+                if timezone.is_naive(ts):
+                    ts = timezone.make_aware(ts)
+                in_closed = DutySession.objects.filter(
+                    employee=employee,
+                    start_time__lte=ts,
+                    end_time__isnull=False,
+                    end_time__gte=ts,
+                ).exists()
+                in_open = DutySession.objects.filter(
+                    employee=employee,
+                    start_time__lte=ts,
+                    end_time__isnull=True,
+                ).exists()
+                if not (in_closed or in_open):
+                    return None, {'non_field_errors': ['Location is outside any duty session.']}
+        except (ValueError, TypeError, AttributeError):
+            pass
     payload = data.copy()
     if 'employee' not in payload or not payload['employee']:
         payload['employee'] = str(employee.id)
