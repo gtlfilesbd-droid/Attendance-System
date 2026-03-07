@@ -187,16 +187,6 @@ class BackgroundWorker {
     sendTimer = Timer.periodic(
       const Duration(seconds: checkIntervalSeconds),
       (timer) async {
-        if (service is AndroidServiceInstance) {
-          if (await service.isForegroundService()) {
-            service.setForegroundNotificationInfo(
-              title: "Genesis Tracking",
-              content:
-                  "Attendance tracking active. Last update: ${DateTime.now().hour}:${DateTime.now().minute}",
-            );
-          }
-        }
-
         try {
           final now = DateTime.now();
           if (now.day != serviceStartDate.day ||
@@ -288,11 +278,23 @@ class BackgroundWorker {
               elapsed >= intervalSeconds;
 
           if (shouldSend) {
-            await LocationService.sendLocationToBackend(position, battery);
+            final bool actualSent =
+                await LocationService.sendLocationToBackend(position, battery);
             await LocationService.syncOfflineData();
             lastSentLat = position.latitude;
             lastSentLng = position.longitude;
             lastSentTime = now;
+            // Update notification only when location was actually delivered to
+            // the server — avoids notification changes on every timer tick.
+            if (actualSent &&
+                service is AndroidServiceInstance &&
+                await service.isForegroundService()) {
+              service.setForegroundNotificationInfo(
+                title: 'Genesis Tracking',
+                content:
+                    'Attendance tracking active. Last update: ${now.hour}:${now.minute.toString().padLeft(2, '0')}',
+              );
+            }
           }
 
           // Phase 1 watchdog: if no location sent for 15 min, stop service (app will restart on resume)
@@ -315,10 +317,21 @@ class BackgroundWorker {
         desiredAccuracy: LocationAccuracy.high,
       );
       cachedPosition = position;
-      await LocationService.sendLocationToBackend(position, battery);
+      final bool initialSent =
+          await LocationService.sendLocationToBackend(position, battery);
       lastSentLat = position.latitude;
       lastSentLng = position.longitude;
       lastSentTime = DateTime.now();
+      if (initialSent &&
+          service is AndroidServiceInstance &&
+          await service.isForegroundService()) {
+        final t = lastSentTime!;
+        service.setForegroundNotificationInfo(
+          title: 'Genesis Tracking',
+          content:
+              'Attendance tracking active. Last update: ${t.hour}:${t.minute.toString().padLeft(2, '0')}',
+        );
+      }
     } catch (e) {
       print("BackgroundWorker: Initial location error $e");
     }

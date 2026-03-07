@@ -159,7 +159,11 @@ class LocationService {
     }
   }
 
-  static Future<void> sendLocationToBackend(
+  /// Returns [true] only when the location was successfully delivered to the
+  /// API. Returns [false] when the send was skipped (filter), saved offline,
+  /// or failed. Callers can use this to decide whether to update UI elements
+  /// such as the foreground notification timestamp.
+  static Future<bool> sendLocationToBackend(
     Position position,
     Battery battery,
   ) async {
@@ -181,13 +185,13 @@ class LocationService {
           'speed': position.speed,
           'battery_level': batteryLevel,
         });
-        return;
+        return false;
       }
 
       // Send-side filter: skip bad GPS (adaptive thresholds in AppConfig)
       if (position.accuracy > AppConfig.maxAccuracyToSendMeters) {
         print('FLUTTER_BG_SERVICE: Skipping send (accuracy ${position.accuracy}m > ${AppConfig.maxAccuracyToSendMeters}m)');
-        return;
+        return false;
       }
 
       // Send-side filter: skip if standing still (no filter on first send).
@@ -208,7 +212,7 @@ class LocationService {
         if (distM < AppConfig.minMovementToSendMeters &&
             elapsedSec < AppConfig.maxIntervalWhenStillSeconds) {
           print('FLUTTER_BG_SERVICE: Skipping send (standing still: ${distM.toStringAsFixed(0)}m moved, ${elapsedSec}s since last)');
-          return;
+          return false;
         }
       }
 
@@ -230,6 +234,7 @@ class LocationService {
         await prefs.setDouble(_keyLastSentLat, position.latitude);
         await prefs.setDouble(_keyLastSentLng, position.longitude);
         await prefs.setString(_keyLastSentTimestamp, timestamp);
+        return true;
       } else {
         print('FLUTTER_BG_SERVICE: API returned failure (no 200/201). Saving offline.');
         await _saveOffline({
@@ -240,6 +245,7 @@ class LocationService {
           'speed': position.speed,
           'battery_level': batteryLevel,
         });
+        return false;
       }
     } catch (e, stackTrace) {
       print('FLUTTER_BG_SERVICE: ERROR sending location: $e');
@@ -252,6 +258,7 @@ class LocationService {
         'speed': position.speed,
         'battery_level': await battery.batteryLevel,
       });
+      return false;
     }
   }
 
