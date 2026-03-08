@@ -1,0 +1,29 @@
+📦 New Version Available: Genesis v3.0.0.apk
+
+এই আপডেটে Admin Panel-এ বিভাগভিত্তিক (Department-level) Permission System যুক্ত করা হয়েছে এবং Live Tracking পেজের ফিল্টার UI উন্নত করা হয়েছে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔹 Department-Level Permission System (Admin Panel)
+Super Admin এখন যেকোনো Staff User-কে নির্দিষ্ট Department বা Department-গুলোর Access দিতে পারবেন।
+— যে Staff User-এর যে Department Assign করা থাকবে, সে শুধুমাত্র সেই Department-এর Employee দেখতে ও Manage করতে পারবে।
+— অন্য কোনো Department-এর Employee, Attendance, Location বা কোনো Activity তার কাছে দৃশ্যমান হবে না।
+— এই Permission টি Admin Panel, Dashboard, Reports, Live Tracking এবং Route History সব জায়গায় কার্যকর।
+— Superuser সবসময় সব Department দেখতে পাবেন — কোনো বিধিনিষেধ নেই।
+
+🔹 Live Tracking পেজে উন্নত Filter UI
+Live Employee Tracking পেজে এখন Reports পেজের মতো Department ও Employee ফিল্টার যুক্ত হয়েছে।
+— Department ফিল্টার করলে সেই Department-এর Employee গুলো স্বয়ংক্রিয়ভাবে ফিল্টার হয়ে যাবে।
+— Employee ফিল্টারে Multi-Select Checkbox Dropdown রয়েছে — একসাথে একাধিক Employee বেছে নেওয়া যাবে।
+— Select All ও Clear All বাটন দিয়ে সহজে সব Employee একবারে Select বা Deselect করা যাবে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎥 আপডেট করার নিয়ম:
+
+🔹 Step 1: আগে আপনার মোবাইল থেকে পুরোনো Genesis অ্যাপটি Uninstall করুন।
+🔹 Step 2: তারপর নতুন ভার্সন Genesis v3.0.0.apk Install করুন।
+
+⚠️ সরাসরি নতুন অ্যাপ ইনস্টল করবেন না। আগে পুরোনো অ্যাপটি আনইনস্টল করা বাধ্যতামূলক।
+
+ধন্যবাদ। 🚀
