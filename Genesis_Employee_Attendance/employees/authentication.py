@@ -9,6 +9,17 @@ is the Employee's UUID. DRF's default JWTAuthentication uses get_user_model()
 This class runs first: when the token's user_id is a valid UUID, we load
 Employee and set request.user = employee. Otherwise we return None so
 JWTAuthentication (Django User) runs next.
+
+IMPORTANT – expired token handling:
+  We return None (unauthenticated) rather than raising AuthenticationFailed when
+  the access token is merely expired.  Raising here would cause DRF to short-circuit
+  the request with 401 *before* permission checking runs — meaning even AllowAny
+  endpoints (e.g. /api/auth/token/refresh/) would be rejected with 401 when the
+  mobile app sends its expired access token in the Authorization header alongside
+  the refresh token body.  The Flutter interceptor treats any 4xx on the refresh
+  endpoint as "refresh token invalid" and triggers an auto-logout.  Returning None
+  lets the request proceed as unauthenticated; IsAuthenticated views still get their
+  401 naturally through DRF's permission layer.
 """
 import logging
 import uuid
@@ -47,11 +58,13 @@ class EmployeeJWTAuthentication(authentication.BaseAuthentication):
         try:
             validated_token = self.get_validated_token(raw_token)
         except ExpiredTokenError:
-            # Access token is structurally valid but expired -> return 401 with a clear JSON error.
-            logger.info("Employee JWT auth: token expired")
-            raise exceptions.AuthenticationFailed(
-                detail={'code': 'token_expired', 'detail': 'Access token has expired.'}
-            )
+            # Return None (unauthenticated) rather than raising AuthenticationFailed.
+            # Raising here would block AllowAny endpoints such as /api/auth/token/refresh/
+            # when the mobile app attaches its expired access token to the Authorization
+            # header of the refresh request, causing a spurious 401 → auto-logout loop.
+            # IsAuthenticated views still receive 401 through DRF's permission layer.
+            logger.info("Employee JWT auth: token expired, treating as unauthenticated")
+            return None
         except TokenError:
             # Any other token error (invalid signature, malformed, etc.) – fall through so the next
             # authentication backend (JWTAuthentication or Session) can try.

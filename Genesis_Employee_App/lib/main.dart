@@ -85,8 +85,14 @@ class _AppLifecycleWrapperState extends State<AppLifecycleWrapper>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused) {
+      // Record when app truly goes to background so ForegroundRefreshService can
+      // compute the correct backgroundDuration on resume.  We intentionally do NOT
+      // record AppLifecycleState.inactive here: on Android the lifecycle sequence
+      // when RETURNING from background is paused → inactive → resumed, so
+      // notifyAppPaused() on inactive would reset _lastPausedAt to DateTime.now()
+      // just milliseconds before onAppResumed() runs, making isLongBackground
+      // always false regardless of how long the app was really in the background.
       ForegroundRefreshService().notifyAppPaused();
     }
     if (state == AppLifecycleState.resumed) {
@@ -194,9 +200,22 @@ class _SplashScreenState extends State<SplashScreen> {
     // Proactive token refresh before Home so first API calls rarely hit 401 (e.g. after app kill).
     if (isLoggedIn) {
       var result = await _authService.refreshToken();
-      if (result != RefreshResult.success) {
+      if (result == RefreshResult.networkOrTransientError) {
         await Future.delayed(const Duration(seconds: 2));
-        await _authService.refreshToken();
+        result = await _authService.refreshToken();
+      }
+      // Refresh token is genuinely invalid (expired >30 days or storage corrupt).
+      // Clear session and send user to login rather than flashing HomeScreen with
+      // a dead session, which triggers a second TOKEN_REFRESH_FAILED immediately.
+      if (result == RefreshResult.invalidToken) {
+        await _authService.logout(reason: 'SESSION_EXPIRED');
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const LoginScreen()),
+          );
+        }
+        return;
       }
     }
 

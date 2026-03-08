@@ -150,6 +150,10 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted) return;
         if (_dutyStartTime != null) {
           await _locationService.startTracking();
+          // Wait for Android to start the foreground service isolate before
+          // calling isRunning(); without this delay the first status check
+          // always returns false even when the service started successfully.
+          await Future.delayed(const Duration(seconds: 1));
           await _checkServiceStatus();
         } else {
           await _locationService.stopTracking();
@@ -159,6 +163,19 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     });
     _fetchCurrentPlaceName().then((_) {
+      // If the first geocoding attempt failed (network not ready on start),
+      // schedule a quick retry after 5 s and again after 15 s before handing
+      // off to the regular periodic timer.
+      if (mounted && (_currentPlaceName.isEmpty || _currentPlaceName == '—')) {
+        Future.delayed(const Duration(seconds: 5), () {
+          if (mounted) _fetchCurrentPlaceName();
+        });
+        Future.delayed(const Duration(seconds: 15), () {
+          if (mounted && (_currentPlaceName.isEmpty || _currentPlaceName == '—')) {
+            _fetchCurrentPlaceName();
+          }
+        });
+      }
       if (mounted) {
         _placeRefreshTimer = Timer.periodic(
           const Duration(minutes: AppConfig.placeNameRefreshMinutes),
@@ -186,9 +203,12 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       await _checkServiceStatus();
       if (!mounted) return;
-      // If we have open session but service was killed (e.g. by Android), restart tracking (single place for resume handling)
+      // If we have open session but service was killed (e.g. by Android Doze),
+      // restart it. Wait 1 s before checking isRunning() because startService()
+      // is asynchronous – the platform channel returns before the isolate is live.
       if (!_isTracking && _dutyStartTime != null) {
         await _locationService.startTracking();
+        await Future.delayed(const Duration(seconds: 1));
         await _checkServiceStatus();
         if (mounted && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -197,6 +217,9 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     });
+    // Refresh location name on every foreground resume so that the displayed
+    // name is up-to-date even if the periodic timer hasn't fired yet.
+    _fetchCurrentPlaceName();
   }
 
   static String _greeting() {
@@ -371,7 +394,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _onRefresh() async {
-    ApiService().initialize();
     // Phase 7: Show throttle message from previous sync if any
     final throttleMsg = ApiService.lastTrackingThrottleMessage;
     if (throttleMsg != null && throttleMsg.isNotEmpty && mounted && context.mounted) {
@@ -394,6 +416,20 @@ class _HomeScreenState extends State<HomeScreen> {
     await _loadData();
     await _loadTodayDutyTime();
     await _checkServiceStatus();
+    // If background service was killed (Android Doze / battery optimisation) but
+    // there is still an open duty session, restart it now so the user does not have
+    // to force-kill and reopen the app to recover the "Inactive" indicator.
+    if (!mounted) return;
+    if (!_isTracking && _dutyStartTime != null) {
+      await _locationService.startTracking();
+      await Future.delayed(const Duration(seconds: 1));
+      await _checkServiceStatus();
+      if (mounted && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tracking resumed')),
+        );
+      }
+    }
   }
 
   Future<void> _fetchCurrentPlaceName() async {
@@ -456,12 +492,12 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (_) {}
 
-    // Step 3: Android/iOS platform geocoder
+    // Step 3: Android/iOS platform geocoder (10 s timeout — can hang without network)
     try {
       final placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
-      );
+      ).timeout(const Duration(seconds: 10));
       String placeName = _currentPlaceName.isEmpty ? '—' : _currentPlaceName;
       if (placemarks.isNotEmpty) {
         final p = placemarks.first;

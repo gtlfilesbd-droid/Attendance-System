@@ -7,10 +7,12 @@ import 'app_log_service.dart';
 import 'auth_service.dart';
 
 /// Backoff delays for refresh retries when result is networkOrTransientError.
+/// Four attempts cover a ~60-second server restart window (2+5+10+30 = 47 s total wait).
 const List<Duration> _refreshBackoffDelays = [
   Duration(seconds: 2),
   Duration(seconds: 5),
   Duration(seconds: 10),
+  Duration(seconds: 30),
 ];
 
 class ApiService {
@@ -118,7 +120,10 @@ class ApiService {
 
           Future<void> doRetryWithNewToken() async {
             final newToken = await authService.getToken();
-            if (newToken == null) return;
+            if (newToken == null) {
+              handler.next(e);
+              return;
+            }
             e.requestOptions.headers['Authorization'] = 'Bearer $newToken';
             final opts = Options(
               method: e.requestOptions.method,
@@ -152,6 +157,11 @@ class ApiService {
           _isRefreshing = true;
           _refreshCompleter = Completer<void>();
           Future<void> doLogout() async {
+            // Only perform logout from the main isolate where onSessionExpired is
+            // wired.  In the background isolate onSessionExpired is null; calling
+            // authService.logout() there would clear the main isolate's secure
+            // storage and leave the UI in an inconsistent state.
+            if (onSessionExpired == null) return;
             try {
               await AppLogService().error('AUTH', 'Token refresh failed', extra: {'path': path});
             } catch (_) {}
@@ -209,7 +219,6 @@ class ApiService {
   /// POST /employees/auth/logout/ - notify backend for audit log (Phase 1: reason + optional device).
   Future<void> logout({String? reason, String? deviceBrand, String? deviceModel, String? androidVersion}) async {
     try {
-      ApiService().initialize();
       final body = <String, dynamic>{};
       if (reason != null && reason.isNotEmpty) body['reason'] = reason;
       if (deviceBrand != null && deviceBrand.isNotEmpty) body['device_brand'] = deviceBrand;
@@ -287,7 +296,6 @@ class ApiService {
   Future<Map<String, dynamic>?> getMyProfile() async {
     if (mockGetMyProfile != null) return mockGetMyProfile!();
     try {
-      ApiService().initialize();
       final response = await _dio.get(AppConfig.employeeProfileEndpoint);
       if (response.statusCode == 200 &&
           response.data != null &&
@@ -373,7 +381,6 @@ class ApiService {
   Future<Map<String, dynamic>?> logLocationBulk(List<Map<String, dynamic>> locations) async {
     if (locations.isEmpty) return {'created': 0, 'errorIndices': <int>[]};
     try {
-      ApiService().initialize();
       final employeeData = await AuthService().getEmployeeData();
       final employeeId = employeeData?['id']?.toString();
       final List<Map<String, dynamic>> payloads = [];
@@ -425,7 +432,6 @@ class ApiService {
     String? deviceOs,
   }) async {
     try {
-      ApiService().initialize();
       final payload = <String, dynamic>{};
       if (deviceId != null) payload['device_id'] = deviceId;
       if (appVersion != null) payload['app_version'] = appVersion;
@@ -540,7 +546,9 @@ class ApiService {
 
   /// Check if current user has an active duty session (for background service).
   /// GET /attendance/active-session/ → { "active": true|false }
-  /// Returns null on network/auth error so caller can skip stop (fail-open).
+  /// Returns null only on genuine network errors (caller keeps service running).
+  /// Returns false on 401/403 (authentication failure = no confirmed active session
+  /// → background service should stop rather than loop endlessly on auth errors).
   Future<bool?> hasActiveDutySession() async {
     try {
       final response = await _dio.get(AppConfig.activeSessionEndpoint);
@@ -550,6 +558,12 @@ class ApiService {
         if (active is bool) return active;
       }
       return false;
+    } on DioException catch (e) {
+      final status = e.response?.statusCode;
+      if (status != null && (status == 401 || status == 403)) {
+        return false;
+      }
+      return null;
     } catch (_) {
       return null;
     }

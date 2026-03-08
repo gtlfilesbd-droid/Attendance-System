@@ -132,20 +132,45 @@ def employee_login(request):
 
 
 @api_view(['POST'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def employee_logout(request):
     """
     Employee logout endpoint (app). Logs the logout event with reason and device (Phase 1).
     POST /api/employees/auth/logout/
     Body (optional): { "reason": "TOKEN_REFRESH_FAILED", "device_brand": "...", "device_model": "...", "android_version": "14" }
-    Requires: Bearer token (JWT).
+
+    AllowAny: no authentication required.  When the app auto-logouts due to
+    TOKEN_REFRESH_FAILED the access token is already expired, so IsAuthenticated
+    would silently reject the call and the audit record would be lost.  Instead
+    we accept the call unauthenticated and, for audit purposes, attempt to resolve
+    the employee identity from the (possibly expired) Bearer token in the header.
     """
-    user = request.user
-    if not isinstance(user, Employee):
-        return Response(
-            {'success': False, 'message': 'Not an employee account.'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+    employee = request.user if isinstance(request.user, Employee) else None
+
+    # Attempt to identify the employee from the Authorization header even when
+    # authentication was not required (e.g. token expired → AllowAny path).
+    if employee is None:
+        try:
+            import uuid as _uuid
+            from django.conf import settings as _s
+            from rest_framework_simplejwt.backends import TokenBackend
+            auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+            if auth_header.startswith('Bearer '):
+                raw_token = auth_header[7:]
+                jwt_cfg = _s.SIMPLE_JWT
+                backend = TokenBackend(
+                    algorithm=jwt_cfg.get('ALGORITHM', 'HS256'),
+                    signing_key=jwt_cfg.get('SIGNING_KEY', _s.SECRET_KEY),
+                )
+                # verify=False skips expiry check so we can read claims from
+                # an expired but otherwise valid (correct signature) token.
+                claims = backend.decode(raw_token, verify=False)
+                uid = claims.get(_s.SIMPLE_JWT.get('USER_ID_CLAIM', 'user_id'))
+                if uid:
+                    employee = Employee.objects.filter(id=_uuid.UUID(str(uid))).first()
+        except Exception:
+            pass
+
     data = (request.data or {}) if hasattr(request, 'data') else {}
     reason = (data.get('reason') or '').strip() or None
     device_brand = (data.get('device_brand') or '').strip() or None
@@ -155,7 +180,7 @@ def employee_logout(request):
         from django.utils import timezone
         from audit.models import UserLoginLog
         UserLoginLog.objects.create(
-            employee=user,
+            employee=employee,
             action='LOGOUT',
             source=UserLoginLog.SOURCE_APP,
             timestamp=timezone.now(),

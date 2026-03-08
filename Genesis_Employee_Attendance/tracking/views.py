@@ -58,6 +58,33 @@ def _seconds_to_hhmmss(total_seconds):
         return '—'
 
 
+# In-memory cache for geocoding results.
+# Key: (lat rounded to 3dp, lon rounded to 3dp) → (address_str, expiry_timestamp).
+# 3 decimal places ≈ 110 m precision — good enough for display names.
+# TTL: 30 minutes. Prevents hammering Nominatim when many employees are near the same spot.
+_geocode_cache: dict = {}
+_GEOCODE_CACHE_TTL = 1800  # seconds
+
+
+def _geocode_cache_get(lat: float, lon: float):
+    key = (round(lat, 3), round(lon, 3))
+    entry = _geocode_cache.get(key)
+    if entry and time_module.time() < entry[1]:
+        return entry[0]
+    return None
+
+
+def _geocode_cache_set(lat: float, lon: float, address: str):
+    key = (round(lat, 3), round(lon, 3))
+    _geocode_cache[key] = (address, time_module.time() + _GEOCODE_CACHE_TTL)
+    # Evict old entries if cache grows too large (>500 entries)
+    if len(_geocode_cache) > 500:
+        now = time_module.time()
+        expired = [k for k, v in _geocode_cache.items() if v[1] < now]
+        for k in expired:
+            _geocode_cache.pop(k, None)
+
+
 def _reverse_geocode(lat, lon):
     """
     Reverse geocode lat/lon to a place name using OpenStreetMap Nominatim.
@@ -165,20 +192,27 @@ def _is_coordinates_only(s):
 def get_display_address(lat, lon):
     """
     Return the same display address string used in the live-tracking marker popup.
-    Uses Nominatim then Photon fallback; if both fail returns formatted coordinates.
-    Callers should handle rate limiting (e.g. sleep between calls) when needed.
+    Uses an in-memory TTL cache (30 min, ~110 m grid) to avoid hammering Nominatim.
+    Falls back to Photon then formatted coordinates.
     """
     if lat is None or lon is None:
         try:
             return f'{float(lat or 0):.5f}, {float(lon or 0):.5f}'
         except (TypeError, ValueError):
             return ''
+
+    cached = _geocode_cache_get(lat, lon)
+    if cached is not None:
+        return cached
+
     addr = _reverse_geocode(lat, lon)
     if not addr:
         addr = _reverse_geocode_photon(lat, lon)
+
+    result = addr if addr else f'{float(lat):.5f}, {float(lon):.5f}'
     if addr:
-        return addr
-    return f'{float(lat):.5f}, {float(lon):.5f}'
+        _geocode_cache_set(lat, lon, result)
+    return result
 
 
 def _get_cached_address_from_db(lat, lon, radius_m=100):
@@ -356,10 +390,25 @@ def log_location(request):
         if serializer.is_valid():
             location_log = serializer.save()
             if not (location_log.address and location_log.address.strip()):
-                addr = get_display_address(location_log.latitude, location_log.longitude)
-                if addr and not _is_coordinates_only(addr):
-                    location_log.address = addr
-                    location_log.save(update_fields=['address'])
+                # Resolve address in a background thread so the response is not delayed
+                # by external geocoding calls (Nominatim/Photon can take up to 5 s).
+                import threading
+                log_id = location_log.id
+                lat_v = location_log.latitude
+                lon_v = location_log.longitude
+
+                def _fill_address(lid, lat, lon):
+                    try:
+                        addr = get_display_address(lat, lon)
+                        if addr and not _is_coordinates_only(addr):
+                            from .models import LocationLog as _LL
+                            _LL.objects.filter(id=lid, address__isnull=True).update(address=addr)
+                    except Exception:
+                        pass
+
+                threading.Thread(
+                    target=_fill_address, args=(log_id, lat_v, lon_v), daemon=True
+                ).start()
             logger.debug("log_location: location saved id=%s", location_log.id)
             logger.info(
                 "log_location: created location_log_id=%s employee_id=%s",

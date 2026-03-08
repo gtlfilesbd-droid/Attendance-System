@@ -1,7 +1,4 @@
-import 'dart:io' show Platform;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
 
 /// Duty reminders are now sent via FCM from the backend (9:00 and 9:28 Asia/Dhaka, Mon-Thu and Sat-Sun).
@@ -12,8 +9,6 @@ class DutyReminderService {
   factory DutyReminderService() => _instance;
   DutyReminderService._internal();
 
-  static const String _channelId = 'genesis_duty_reminder_channel';
-  static const String _channelName = 'Duty Reminders';
   static const int _idBase = 901;
 
   final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();

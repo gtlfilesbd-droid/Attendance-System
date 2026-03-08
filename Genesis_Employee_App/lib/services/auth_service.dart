@@ -162,24 +162,47 @@ class AuthService {
     return null;
   }
 
-  /// Get stored refresh token
+  /// Get stored refresh token.
+  /// Returns null when FlutterSecureStorage is unavailable (e.g. background
+  /// isolate Keystore conflict); callers should treat null as a transient error,
+  /// NOT as "token does not exist", to avoid a false TOKEN_REFRESH_FAILED logout.
   Future<String?> getRefreshToken() async {
-    return await _storage.read(key: AppConfig.refreshTokenKey);
+    try {
+      return await _storage.read(key: AppConfig.refreshTokenKey);
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Refresh access token using refresh token.
   /// Returns [RefreshResult.success] on 200 with access token;
   /// [RefreshResult.invalidToken] on 401/4xx (refresh token expired or invalid);
   /// [RefreshResult.networkOrTransientError] on timeout, connection error, or 5xx.
+  ///
+  /// Uses a plain Dio instance (no auth interceptor) so that the expired access
+  /// token is never sent in the Authorization header of the refresh request.
+  /// Sending an expired token on the refresh endpoint causes the backend's
+  /// EmployeeJWTAuthentication to reject the request with 401 before the refresh
+  /// body is processed, resulting in a spurious TOKEN_REFRESH_FAILED auto-logout.
   Future<RefreshResult> refreshToken() async {
     try {
       final refreshToken = await getRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) {
-        return RefreshResult.invalidToken;
-      }
+      // null  → FlutterSecureStorage threw (background isolate Keystore conflict) →
+      //         treat as transient so the interceptor retries with backoff instead of
+      //         triggering a spurious TOKEN_REFRESH_FAILED auto-logout.
+      // empty → token was stored as an empty string (should not happen) → invalid.
+      if (refreshToken == null) return RefreshResult.networkOrTransientError;
+      if (refreshToken.isEmpty) return RefreshResult.invalidToken;
 
       ApiService().initialize();
-      final dio = ApiService().client;
+      // Use a dedicated plain Dio instance with no interceptors so the expired
+      // access token is not attached to the Authorization header of this request.
+      final dio = Dio(BaseOptions(
+        baseUrl: ApiService().client.options.baseUrl,
+        connectTimeout: ApiService().client.options.connectTimeout,
+        receiveTimeout: ApiService().client.options.receiveTimeout,
+        contentType: 'application/json',
+      ));
       final response = await dio.post(
         AppConfig.tokenRefreshEndpoint,
         data: {'refresh': refreshToken},

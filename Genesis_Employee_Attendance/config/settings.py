@@ -217,8 +217,8 @@ SIMPLE_JWT = {
     # 43200 min = 30 days: user stays logged in until manual logout unless you set shorter in .env
     'REFRESH_TOKEN_LIFETIME': timedelta(minutes=config('JWT_REFRESH_TOKEN_LIFETIME', default=43200, cast=int)),
     'ROTATE_REFRESH_TOKENS': True,
-    'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
+    'BLACKLIST_AFTER_ROTATION': False,
+    'UPDATE_LAST_LOGIN': False,
     
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,

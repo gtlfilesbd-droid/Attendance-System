@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
 from django.contrib.auth.models import User
-from django.contrib.auth.hashers import make_password, check_password
+from django.contrib.auth.hashers import make_password, check_password, is_password_usable
 
 
 class Department(models.Model):
@@ -125,8 +125,7 @@ class Employee(models.Model):
         return False
 
     def save(self, *args, **kwargs):
-        # Hash password if it's not already hashed
-        if self.password and not self.password.startswith('pbkdf2_'):
+        if self.password and not is_password_usable(self.password):
             self.set_password(self.password)
         super().save(*args, **kwargs)
 

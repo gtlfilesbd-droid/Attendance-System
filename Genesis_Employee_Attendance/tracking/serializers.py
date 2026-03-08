@@ -62,9 +62,10 @@ class LocationCreateSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=500)
     
     def validate_timestamp(self, value):
-        """Validate timestamp is not in the future"""
+        """Validate timestamp is not in the future (10 s tolerance for phone clock drift)."""
         from django.utils import timezone
-        if value > timezone.now():
+        from datetime import timedelta
+        if value > timezone.now() + timedelta(seconds=10):
             raise serializers.ValidationError("Timestamp cannot be in the future.")
         return value
     

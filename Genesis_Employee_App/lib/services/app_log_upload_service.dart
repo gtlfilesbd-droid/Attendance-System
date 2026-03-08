@@ -1,5 +1,4 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../config/app_config.dart';
 import '../database/app_log_db.dart';
@@ -36,12 +35,9 @@ class AppLogUploadService {
       final device = _deviceFromRows(rows);
       final logs = rows.map((r) => _rowToPayload(r)).toList();
       try {
-        ApiService().initialize();
-        final dio = ApiService().client;
-        final response = await dio.post(
+        final response = await ApiService().client.post(
           AppConfig.mobileLogsBulkEndpoint,
           data: {'device': device, 'logs': logs},
-          options: Options(headers: {'Authorization': 'Bearer $token'}),
         );
         if (response.statusCode == 200) {
           final ids = rows.map((r) => r['id'] as int).toList();

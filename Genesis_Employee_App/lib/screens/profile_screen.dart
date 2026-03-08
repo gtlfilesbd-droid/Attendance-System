@@ -21,6 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Map<String, dynamic>? _employeeData;
   bool _isLoading = true;
   String? _loadError;
+  bool _isLoggingOut = false;
 
   @override
   void initState() {
@@ -109,6 +110,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _logout() async {
+    if (_isLoggingOut) return;
+    setState(() => _isLoggingOut = true);
+    try {
+      await _doLogout();
+    } finally {
+      if (mounted) setState(() => _isLoggingOut = false);
+    }
+  }
+
+  Future<void> _doLogout() async {
     final now = DateTime.now();
     final yesterdayStr = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
     final tomorrowStr = DateFormat('yyyy-MM-dd').format(now.add(const Duration(days: 1)));
@@ -258,7 +269,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
-            onPressed: _logout,
+            onPressed: _isLoggingOut ? null : _logout,
           ),
         ],
       ),
@@ -346,7 +357,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _logout,
+                  onPressed: _isLoggingOut ? null : _logout,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colorScheme.errorContainer,
                     foregroundColor: colorScheme.onErrorContainer,

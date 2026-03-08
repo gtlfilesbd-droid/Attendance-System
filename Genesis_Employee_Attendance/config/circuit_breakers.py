@@ -39,11 +39,25 @@ class SimpleCircuitBreaker:
             self._opened_at = time.time()
 
 
-_breakers: dict[str, SimpleCircuitBreaker] = defaultdict(SimpleCircuitBreaker)
+def _make_breaker(name: str) -> SimpleCircuitBreaker:
+    # Nominatim is an external free service — back off for 5 minutes after 5 failures
+    # so we don't hammer a rate-limited endpoint and waste request cycles.
+    if name == 'nominatim':
+        return SimpleCircuitBreaker(failure_threshold=5, recovery_timeout=300)
+    return SimpleCircuitBreaker()
+
+
+_breakers: dict[str, SimpleCircuitBreaker] = {}
+
+
+def _get_or_create(name: str) -> SimpleCircuitBreaker:
+    if name not in _breakers:
+        _breakers[name] = _make_breaker(name)
+    return _breakers[name]
 
 
 def get_breaker(name: str) -> SimpleCircuitBreaker:
-    return _breakers[name]
+    return _get_or_create(name)
 
 
 def with_circuit(name: str, func: Callable[[], Any]) -> Any:
@@ -51,7 +65,7 @@ def with_circuit(name: str, func: Callable[[], Any]) -> Any:
     Run func under a named breaker.
     Raises RuntimeError('circuit_open') if breaker is open.
     """
-    br = get_breaker(name)
+    br = _get_or_create(name)
     if br.is_open:
         raise RuntimeError('circuit_open')
     try:

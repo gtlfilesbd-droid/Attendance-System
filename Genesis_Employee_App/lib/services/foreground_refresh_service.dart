@@ -99,14 +99,33 @@ class ForegroundRefreshService {
       await Future.delayed(_resumeConnectivityRetryDelay);
       refreshResult = await AuthService().refreshToken();
     }
+    if (refreshResult == RefreshResult.invalidToken) {
+      // Refresh token is genuinely expired/invalid → log out immediately so the
+      // user sees the login screen rather than a HomeScreen with a dead session.
+      try {
+        await AuthService().logout(reason: 'SESSION_EXPIRED');
+      } catch (_) {}
+      ApiService.onSessionExpired?.call();
+      return ForegroundRefreshResult.skippedTransient;
+    }
     if (refreshResult != RefreshResult.success) {
-      // Do not show "No internet" – may be transient or invalid token; interceptor handles 401.
+      // Token refresh failed transiently (e.g. server slow, radio re-connecting
+      // after Doze).  We still notify listeners so HomeScreen can recheck the
+      // background service status and restart it if it was killed by Android —
+      // that check does not require a valid token (isRunning() is local IPC only).
+      // We skip the data-sync/upload paths since those need authenticated API calls.
+      unawaited(Future.delayed(_listenerDelay, () {
+        for (final listener in List<VoidCallback>.from(_listeners)) {
+          try {
+            listener();
+          } catch (_) {}
+        }
+      }));
       return ForegroundRefreshResult.skippedTransient;
     }
 
     _refreshing = true;
     try {
-      ApiService().initialize();
 
       final backgroundDuration = _lastPausedAt != null
           ? now.difference(_lastPausedAt!)
