@@ -1,6 +1,7 @@
 from django.contrib import admin
 from django.utils import timezone
 from config.admin_export import AdminExportMixin
+from employees.department_permissions import get_permitted_departments
 from .models import Attendance, DutySession
 from .admin_filters import (
     format_time_12h,
@@ -49,7 +50,18 @@ class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
     actions = ['calculate_hours']
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('employee')
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            from employees.models import Employee
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def formatted_date(self, obj):
         return obj.date.strftime('%A, %d %b %Y') if obj.date else '—'
@@ -116,7 +128,18 @@ class DutySessionAdmin(AdminExportMixin, admin.ModelAdmin):
     readonly_fields = ['id']
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('employee')
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            from employees.models import Employee
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def formatted_date(self, obj):
         return obj.date.strftime('%A, %d %b %Y') if obj.date else '—'

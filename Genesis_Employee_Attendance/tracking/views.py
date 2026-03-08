@@ -20,6 +20,7 @@ from .serializers import (
 )
 from config.circuit_breakers import with_circuit
 from config.throttling import TrackingRateThrottle
+from employees.department_permissions import get_permitted_departments
 
 # Dashboard (template) views
 from django.contrib.auth.decorators import login_required
@@ -548,9 +549,11 @@ def live_locations(request):
     try:
         # Get locations from last 15 minutes
         cutoff_time = timezone.now() - timedelta(minutes=15)
-        latest_timestamps = LocationLog.objects.filter(
-            timestamp__gte=cutoff_time
-        ).values('employee').annotate(
+        logs_qs = LocationLog.objects.filter(timestamp__gte=cutoff_time)
+        if not getattr(request.user, 'is_superuser', False):
+            permitted = get_permitted_departments(request.user)
+            logs_qs = logs_qs.filter(employee__department__in=permitted)
+        latest_timestamps = logs_qs.values('employee').annotate(
             latest_time=Max('timestamp')
         )
 
@@ -668,6 +671,14 @@ def latest_location(request):
             'message': f'No employee with email "{email}".',
         }, status=status.HTTP_404_NOT_FOUND)
 
+    if not getattr(request.user, 'is_superuser', False):
+        permitted = get_permitted_departments(request.user)
+        if employee.department_id is None or not permitted.filter(pk=employee.department_id).exists():
+            return Response({
+                'success': False,
+                'message': 'You do not have permission to view this employee.',
+            }, status=status.HTTP_403_FORBIDDEN)
+
     location = (
         LocationLog.objects.filter(employee=employee)
         .order_by('-timestamp')
@@ -746,6 +757,19 @@ def employee_route(request):
             'success': False,
             'message': 'You do not have permission to view this route'
         }, status=status.HTTP_403_FORBIDDEN)
+
+    if request.user.is_staff and not getattr(request.user, 'is_superuser', False):
+        from employees.models import Employee
+        try:
+            emp = Employee.objects.get(pk=employee_id)
+            permitted = get_permitted_departments(request.user)
+            if emp.department_id is None or not permitted.filter(pk=emp.department_id).exists():
+                return Response({
+                    'success': False,
+                    'message': 'You do not have permission to view this route'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except Employee.DoesNotExist:
+            pass  # Will return 404 from get_route_history
     
     # Parse date
     if date_str:
@@ -970,23 +994,29 @@ def dashboard_home(request):
     if selected_date > today:
         selected_date = today
 
-    # Total active employees
-    total_employees = Employee.objects.filter(is_active=True).count()
+    # Department filter for non-superusers
+    permitted = get_permitted_departments(request.user)
+    emp_filter = {'is_active': True}
+    sess_filter = {}
+    if not request.user.is_superuser:
+        emp_filter['department__in'] = permitted
+        sess_filter['employee__department__in'] = permitted
+
+    # Total active employees (within permitted departments)
+    total_employees = Employee.objects.filter(**emp_filter).count()
 
     # On Duty: employees with open session (end_time is NULL) for selected date
-    on_duty_ids = set(
-        DutySession.objects.filter(
-            date=selected_date, end_time__isnull=True
-        ).values_list('employee_id', flat=True).distinct()
+    on_duty_qs = DutySession.objects.filter(
+        date=selected_date, end_time__isnull=True, **sess_filter
     )
+    on_duty_ids = set(on_duty_qs.values_list('employee_id', flat=True).distinct())
     on_duty_count = len(on_duty_ids)
 
     # Off Duty: employees with at least one closed session for date AND no open session
-    employees_with_closed = set(
-        DutySession.objects.filter(
-            date=selected_date, end_time__isnull=False
-        ).values_list('employee_id', flat=True).distinct()
+    closed_qs = DutySession.objects.filter(
+        date=selected_date, end_time__isnull=False, **sess_filter
     )
+    employees_with_closed = set(closed_qs.values_list('employee_id', flat=True).distinct())
     off_duty_ids = employees_with_closed - on_duty_ids
     off_duty_count = len(off_duty_ids)
 
@@ -1005,25 +1035,20 @@ def dashboard_home(request):
     trend_off_duty = []
     trend_absent = []
     for d in trend_dates:
-        on_ids = set(
-            DutySession.objects.filter(date=d, end_time__isnull=True)
-            .values_list('employee_id', flat=True)
-            .distinct()
-        )
-        closed_ids = set(
-            DutySession.objects.filter(date=d, end_time__isnull=False)
-            .values_list('employee_id', flat=True)
-            .distinct()
-        )
+        on_qs = DutySession.objects.filter(date=d, end_time__isnull=True, **sess_filter)
+        on_ids = set(on_qs.values_list('employee_id', flat=True).distinct())
+        closed_qs_d = DutySession.objects.filter(date=d, end_time__isnull=False, **sess_filter)
+        closed_ids = set(closed_qs_d.values_list('employee_id', flat=True).distinct())
         off_ids = closed_ids - on_ids
         trend_on_duty.append(len(on_ids))
         trend_off_duty.append(len(off_ids))
         trend_absent.append(max(total_employees - len(on_ids) - len(off_ids), 0))
 
     # Recent activities: selected date's Attendance records, enriched with start/end locations
-    recent_activities = Attendance.objects.filter(
-        date=selected_date
-    ).select_related('employee').order_by('-created_at')[:10]
+    att_qs = Attendance.objects.filter(date=selected_date).select_related('employee')
+    if sess_filter:
+        att_qs = att_qs.filter(employee__department__in=permitted)
+    recent_activities = att_qs.order_by('-created_at')[:10]
 
     recent_activities_enriched = []
     for att in recent_activities:
@@ -1091,22 +1116,26 @@ def dashboard_employee_list(request):
     if selected_date > today:
         selected_date = today
 
+    permitted = get_permitted_departments(request.user)
+    emp_base = Employee.objects.filter(is_active=True)
+    sess_filter = {}
+    if not request.user.is_superuser:
+        emp_base = emp_base.filter(department__in=permitted)
+        sess_filter = {'employee__department__in': permitted}
+
     employees = []
     if filter_type == 'total':
         employees = list(
-            Employee.objects.filter(is_active=True)
-            .select_related('department', 'designation')
-            .order_by('name')
+            emp_base.select_related('department', 'designation').order_by('name')
         )
         employees = [{'name': e.name, 'employee_id': e.employee_id, 'department': e.department.name if e.department else '—',
                      'designation': e.designation.name if e.designation else '—', 'email': e.email, 'phone': e.phone or '—'} for e in employees]
     elif filter_type == 'on_duty':
-        on_duty_ids = list(
-            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
-            .values_list('employee_id', flat=True)
-            .distinct()
+        on_duty_qs = DutySession.objects.filter(
+            date=selected_date, end_time__isnull=True, **sess_filter
         )
-        for emp in Employee.objects.filter(id__in=on_duty_ids, is_active=True).select_related('department', 'designation'):
+        on_duty_ids = list(on_duty_qs.values_list('employee_id', flat=True).distinct())
+        for emp in emp_base.filter(id__in=on_duty_ids).select_related('department', 'designation'):
             open_session = DutySession.objects.filter(
                 employee=emp, date=selected_date, end_time__isnull=True
             ).order_by('-start_time').first()
@@ -1132,16 +1161,16 @@ def dashboard_employee_list(request):
         employees.sort(key=lambda x: x['name'])
     elif filter_type == 'off_duty':
         on_duty_ids = set(
-            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
-            .values_list('employee_id', flat=True)
-            .distinct()
+            DutySession.objects.filter(
+                date=selected_date, end_time__isnull=True, **sess_filter
+            ).values_list('employee_id', flat=True).distinct()
         )
         off_duty_ids = set(
-            DutySession.objects.filter(date=selected_date, end_time__isnull=False)
-            .values_list('employee_id', flat=True)
-            .distinct()
+            DutySession.objects.filter(
+                date=selected_date, end_time__isnull=False, **sess_filter
+            ).values_list('employee_id', flat=True).distinct()
         ) - on_duty_ids
-        for emp in Employee.objects.filter(id__in=off_duty_ids, is_active=True).select_related('department', 'designation'):
+        for emp in emp_base.filter(id__in=off_duty_ids).select_related('department', 'designation'):
             first_session = DutySession.objects.filter(
                 employee=emp, date=selected_date
             ).order_by('start_time').first()
@@ -1173,17 +1202,17 @@ def dashboard_employee_list(request):
         employees.sort(key=lambda x: x['name'])
     elif filter_type == 'absent':
         on_duty_ids = set(
-            DutySession.objects.filter(date=selected_date, end_time__isnull=True)
-            .values_list('employee_id', flat=True)
-            .distinct()
+            DutySession.objects.filter(
+                date=selected_date, end_time__isnull=True, **sess_filter
+            ).values_list('employee_id', flat=True).distinct()
         )
         off_duty_ids = set(
-            DutySession.objects.filter(date=selected_date, end_time__isnull=False)
-            .values_list('employee_id', flat=True)
-            .distinct()
+            DutySession.objects.filter(
+                date=selected_date, end_time__isnull=False, **sess_filter
+            ).values_list('employee_id', flat=True).distinct()
         ) - on_duty_ids
         attended_ids = on_duty_ids | off_duty_ids
-        for emp in Employee.objects.filter(is_active=True).exclude(id__in=attended_ids).select_related('department', 'designation').order_by('name'):
+        for emp in emp_base.exclude(id__in=attended_ids).select_related('department', 'designation').order_by('name'):
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
@@ -1207,10 +1236,35 @@ def live_tracking_view(request):
     Template: dashboard/live_tracking.html
     JavaScript polls live locations every 10 seconds for snappier updates during duty.
     """
+    import json as _json
+    from employees.models import Employee
+
     poll_interval_ms = 10000
+    permitted = get_permitted_departments(request.user)
+    departments = list(permitted.values_list('name', flat=True).order_by('name'))
+    employees = list(
+        Employee.objects.filter(is_active=True, department__in=permitted)
+        .select_related('department')
+        .order_by('name')
+        .values('id', 'employee_id', 'name', 'department__name')
+    )
+    employees_json = _json.dumps(
+        [
+            {
+                'id': str(e['id']),
+                'employee_id': e['employee_id'],
+                'name': e['name'],
+                'department': e['department__name'] or '—',
+            }
+            for e in employees
+        ],
+        default=str,
+    )
     context = {
         'poll_interval_ms': poll_interval_ms,
         'poll_interval_seconds': poll_interval_ms // 1000,
+        'departments': departments,
+        'employees_json': employees_json,
     }
     return render(request, 'dashboard/live_tracking.html', context)
 
@@ -1226,17 +1280,18 @@ def route_history_view(request):
     from employees.models import Employee, Department
 
     if getattr(request.user, 'is_staff', False):
+        permitted = get_permitted_departments(request.user)
         departments = list(
-            Department.objects.filter(is_active=True).values_list('name', flat=True).order_by('name')
+            permitted.values_list('name', flat=True).order_by('name')
         )
         employees = list(
-            Employee.objects.filter(is_active=True)
+            Employee.objects.filter(is_active=True, department__in=permitted)
             .select_related('department')
             .order_by('name')
             .values('id', 'employee_id', 'name', 'department__name')
         )
     else:
-        employees_qs = Employee.objects.filter(id=request.user.id).select_related('department')
+        employees_qs = Employee.objects.filter(user=request.user).select_related('department')
         employees = list(
             employees_qs.values('id', 'employee_id', 'name', 'department__name')
         )
@@ -1275,8 +1330,13 @@ def attendance_reports_view(request):
     
     # Get unique departments and all employees; filter by department on client
     import json
-    departments = list(Department.objects.filter(is_active=True).values_list('name', flat=True).order_by('name'))
-    employees = list(Employee.objects.filter(is_active=True).select_related('department').order_by('name').values('id', 'employee_id', 'name', 'department__name'))
+    permitted = get_permitted_departments(request.user)
+    departments = list(permitted.values_list('name', flat=True).order_by('name'))
+    employees = list(
+        Employee.objects.filter(is_active=True, department__in=permitted)
+        .select_related('department').order_by('name')
+        .values('id', 'employee_id', 'name', 'department__name')
+    )
     employees_json = json.dumps([{'id': str(e['id']), 'employee_id': e['employee_id'], 'name': e['name'], 'department': e['department__name'] or '—'} for e in employees], default=str)
 
     context = {
@@ -1307,6 +1367,8 @@ def export_csv(request):
     # Check if user is staff
     if not request.user.is_staff:
         return HttpResponse('Unauthorized', status=403)
+    
+    permitted = get_permitted_departments(request.user)
     
     # Get parameters
     report_type = request.GET.get('report_type', 'daily')
@@ -1353,6 +1415,8 @@ def export_csv(request):
         
         # Get detailed records
         queryset = Attendance.objects.filter(date=reference_date).select_related('employee', 'employee__department')
+        if not request.user.is_superuser:
+            queryset = queryset.filter(employee__department__in=permitted)
         if department:
             queryset = queryset.filter(employee__department__name=department)
         
@@ -1424,16 +1488,19 @@ def export_csv(request):
             date__gte=first_day,
             date__lte=last_day
         ).select_related('employee', 'employee__department')
-        
+        if not request.user.is_superuser:
+            queryset = queryset.filter(employee__department__in=permitted)
         if department:
             queryset = queryset.filter(employee__department__name=department)
         
         # Summary
         from django.db.models import Sum, Avg
-        total_employees = Employee.objects.filter(is_active=True).count()
+        total_employees_qs = Employee.objects.filter(is_active=True)
+        if not request.user.is_superuser:
+            total_employees_qs = total_employees_qs.filter(department__in=permitted)
         if department:
-            total_employees = Employee.objects.filter(is_active=True, department__name=department).count()
-        
+            total_employees_qs = total_employees_qs.filter(department__name=department)
+        total_employees = total_employees_qs.count()
         writer.writerow(['Summary'])
         writer.writerow(['Working Days', (last_day - first_day).days + 1])
         writer.writerow(['Total Employees', total_employees])

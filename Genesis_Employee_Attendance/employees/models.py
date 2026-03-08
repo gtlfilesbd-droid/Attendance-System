@@ -162,3 +162,30 @@ class DeviceToken(models.Model):
 
     def __str__(self):
         return f"{self.employee.name} ({self.platform})"
+
+
+class UserDepartmentPermission(models.Model):
+    """
+    Department-level permission for Django User (admin panel users).
+    When set, the user can only view/add employees in the assigned departments.
+    Superusers bypass this restriction.
+    """
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name='department_permission'
+    )
+    departments = models.ManyToManyField(
+        Department,
+        blank=True,
+        related_name='permitted_users'
+    )
+
+    class Meta:
+        db_table = 'user_department_permissions'
+        verbose_name = 'User Department Permission'
+        verbose_name_plural = 'User Department Permissions'
+
+    def __str__(self):
+        dept_count = self.departments.count()
+        return f"{self.user.username} - {dept_count} department(s)"

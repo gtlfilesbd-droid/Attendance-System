@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils import timezone
+from employees.department_permissions import get_permitted_departments
 from .models import UserLoginLog, MobileLog
 
 
@@ -13,6 +14,15 @@ class UserLoginLogAdmin(admin.ModelAdmin):
     search_fields = ['user__username', 'user__email', 'employee__name', 'employee__email', 'employee__employee_id']
     ordering = ['-timestamp']
     readonly_fields = ['id', 'user', 'employee', 'action', 'source', 'timestamp', 'reason', 'device_brand', 'device_model', 'android_version']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('user', 'employee')
+        if request.user.is_superuser:
+            return qs
+        from django.db.models import Q
+        permitted = get_permitted_departments(request.user)
+        # Show: own user logins OR employee logins in permitted departments
+        return qs.filter(Q(user_id=request.user.id) | Q(employee__department__in=permitted))
 
     def get_actor(self, obj):
         if obj.user_id:
@@ -55,6 +65,13 @@ class MobileLogAdmin(admin.ModelAdmin):
     list_filter = ['employee', 'level', 'category', 'device_brand', 'device_android_version']
     search_fields = ['employee__name', 'employee__email', 'message']
     ordering = ['-timestamp']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
     readonly_fields = [
         'employee', 'timestamp', 'level', 'category', 'message', 'extra_json',
         'stack_trace', 'duration_ms', 'device_android_version', 'device_brand',

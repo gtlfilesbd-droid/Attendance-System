@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.contrib.gis.admin import OSMGeoAdmin
 from django.utils import timezone
 from config.admin_export import AdminExportMixin
+from employees.department_permissions import get_permitted_departments
 from .models import LocationLog, LocationAnomaly
 from attendance.admin_filters import format_time_12h
 
@@ -34,7 +35,18 @@ class LocationLogAdmin(AdminExportMixin, OSMGeoAdmin):
     )
 
     def get_queryset(self, request):
-        return super().get_queryset(request).select_related('employee')
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            from employees.models import Employee
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def formatted_date(self, obj):
         if obj.timestamp:
@@ -56,3 +68,17 @@ class LocationAnomalyAdmin(AdminExportMixin, admin.ModelAdmin):
     list_filter = ['reason', 'date', 'employee']
     search_fields = ['employee__employee_id', 'employee__name', 'employee__email']
     ordering = ['-date', '-created_at']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            from employees.models import Employee
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)

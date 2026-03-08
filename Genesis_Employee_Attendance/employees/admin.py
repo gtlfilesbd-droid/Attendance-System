@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.utils.safestring import mark_safe
 from config.admin_export import AdminExportMixin
 from .models import Employee, Department, Designation, DeviceToken
+from .department_permissions import get_permitted_departments
 
 
 @admin.register(Department)
@@ -26,6 +27,19 @@ class DeviceTokenAdmin(admin.ModelAdmin):
     list_filter = ['platform']
     search_fields = ['employee__name', 'employee__email', 'fcm_token']
     readonly_fields = ['created_at', 'updated_at']
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('employee')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(Employee)
@@ -73,6 +87,19 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
         )
     
     profile_picture_preview.short_description = 'Profile picture'
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'department' and not request.user.is_superuser:
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = permitted
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
     def save_model(self, request, obj, form, change):
         # Hash password if it's being set/changed

@@ -5,11 +5,19 @@ Must be imported before admin URLs are loaded.
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.models import User, Group
+from employees.models import UserDepartmentPermission
 from .admin_export import AdminExportMixin
+
+
+class UserDepartmentPermissionInline(admin.StackedInline):
+    model = UserDepartmentPermission
+    extra = 0
+    filter_horizontal = ['departments']  # Horizontal multi-select for department assignment
 
 
 class UserAdminWithExport(AdminExportMixin, BaseUserAdmin):
     change_list_template = 'admin/change_list_export.html'
+    inlines = [UserDepartmentPermissionInline]
 
 
 class GroupAdminWithExport(AdminExportMixin, BaseGroupAdmin):
