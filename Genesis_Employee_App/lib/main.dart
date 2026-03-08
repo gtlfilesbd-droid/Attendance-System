@@ -195,6 +195,13 @@ class _SplashScreenState extends State<SplashScreen> {
       Future.delayed(const Duration(seconds: 2)),
       widget.initFuture ?? Future.value(),
     ]);
+
+    // Purge stale Keystore tokens left over from a previous install or after
+    // "Clear Data" in App Info on OEMs where Android Keystore survives the wipe
+    // (e.g. TECNO, Xiaomi).  Must run before isLoggedIn() so stale tokens cannot
+    // bypass the login screen.
+    await _authService.ensureStorageIntegrity();
+
     final isLoggedIn = await _authService.isLoggedIn();
 
     // Proactive token refresh before Home so first API calls rarely hit 401 (e.g. after app kill).

@@ -34,6 +34,43 @@ class AuthService {
   /// copy that both the main and background isolates can read.
   static const String _bgTokenKey = 'bg_auth_token';
 
+  /// Guard key stored in SharedPreferences (always wiped by "Clear Data" in
+  /// App Info, unlike Android Keystore entries which survive on many OEMs).
+  /// Used to detect stale Keystore tokens after Clear Data or reinstall.
+  static const String _storageGuardKey = 'storage_guard_v1';
+
+  /// Detects and purges stale Keystore tokens left over from a previous install
+  /// or after "Clear Data" in App Info on OEMs where Keystore survives the wipe.
+  ///
+  /// Strategy: SharedPreferences is ALWAYS cleared by "Clear Data" / uninstall,
+  /// whereas Android Keystore entries can persist on TECNO, Xiaomi, and other
+  /// Chinese OEMs.  If the guard key is absent in SharedPreferences but tokens
+  /// are still readable from FlutterSecureStorage, the storage is stale and must
+  /// be purged so the app shows the login screen instead of a dead session.
+  Future<void> ensureStorageIntegrity() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey(_storageGuardKey)) return; // normal launch — nothing to do
+
+      // Guard absent: SharedPreferences was wiped (Clear Data or fresh install).
+      // Purge Keystore remnants so stale tokens cannot bypass the login screen.
+      try {
+        await _storage.deleteAll();
+      } catch (_) {}
+      try {
+        await prefs.remove(_bgTokenKey);
+      } catch (_) {}
+    } catch (_) {}
+  }
+
+  /// Sets the storage guard in SharedPreferences after a successful login.
+  Future<void> _setStorageGuard() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_storageGuardKey, true);
+    } catch (_) {}
+  }
+
   /// Login with email and password.
   /// Returns null on success, or error message String on failure (Phase 7: includes 429 throttle message).
   Future<String?> login(String email, String password) async {
@@ -63,6 +100,9 @@ class AuthService {
             await _storage.write(key: AppConfig.employeeEmailKey, value: employee['email']);
           }
         }
+        // Mark storage as initialised so ensureStorageIntegrity() won't clear
+        // Keystore entries on next launch (guard survives across app restarts).
+        await _setStorageGuard();
         try {
           await PushNotificationService().registerFCMToken();
         } catch (_) {}
