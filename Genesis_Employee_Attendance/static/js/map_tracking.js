@@ -12,8 +12,6 @@ class MapTracking {
         this.isPlaying = false;
         this.playbackSpeed = 1;
         this.currentPlaybackIndex = 0;
-        this.onProgressCallback = null;
-        this.onLocationCallback = null;
         this.autoRefreshTimer = null;
     }
 
@@ -31,7 +29,7 @@ class MapTracking {
             });
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(this.map);
             return this.map;
         } catch (e) {
@@ -56,7 +54,7 @@ class MapTracking {
             });
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
-                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             }).addTo(this.map);
             return this.map;
         } catch (e) {
@@ -69,15 +67,25 @@ class MapTracking {
         }
     }
 
-    // ─── Live Tracking ────────────────────────────────────────────────────────
+    // ─── Live Tracking API ────────────────────────────────────────────────────
 
     async fetchLiveLocations() {
         try {
-            const resp = await fetch('/api/live-locations/', {
-                headers: { 'X-CSRFToken': this._getCSRFToken() }
+            const resp = await fetch('/api/tracking/live-locations/', {
+                headers: {
+                    'X-CSRFToken': this._getCSRFToken(),
+                    'Content-Type': 'application/json'
+                }
             });
             if (!resp.ok) throw new Error('API error ' + resp.status);
-            return await resp.json();
+            const json = await resp.json();
+            // Response format: { success: true, data: { locations: [...] } }
+            if (json && json.data && Array.isArray(json.data.locations)) {
+                return json.data.locations;
+            }
+            // Fallback: if it's already an array
+            if (Array.isArray(json)) return json;
+            return [];
         } catch (e) {
             console.error('fetchLiveLocations error:', e);
             return [];
@@ -90,7 +98,6 @@ class MapTracking {
             try {
                 const locations = await this.fetchLiveLocations();
                 if (callback) callback(locations);
-                this.updateMapMarkers(locations);
             } catch (e) {
                 console.error('Auto-refresh error:', e);
             }
@@ -116,7 +123,8 @@ class MapTracking {
             const lng = parseFloat(loc.longitude);
             if (isNaN(lat) || isNaN(lng)) return;
 
-            const id = loc.employee_id || loc.id;
+            const id = String(loc.employee_id || loc.id || '');
+            if (!id) return;
             seen.add(id);
 
             const initials = this._getInitials(loc.employee_name || loc.name || '?');
@@ -126,24 +134,51 @@ class MapTracking {
             if (this.markers[id]) {
                 this.markers[id].setLatLng([lat, lng]);
                 this.markers[id].setIcon(icon);
+                if (this.markers[id].getPopup()) {
+                    this.markers[id].getPopup().setContent(this._buildPopupContent(loc));
+                }
             } else {
                 const marker = L.marker([lat, lng], { icon })
                     .bindPopup(this._buildPopupContent(loc));
                 marker.addTo(this.map);
                 this.markers[id] = marker;
             }
-
-            // Update popup content
-            this.markers[id].getPopup()?.setContent(this._buildPopupContent(loc));
         });
 
         // Remove markers no longer in the feed
         Object.keys(this.markers).forEach(id => {
-            if (!seen.has(id) && !seen.has(Number(id))) {
+            if (!seen.has(id)) {
                 this.map.removeLayer(this.markers[id]);
                 delete this.markers[id];
             }
         });
+    }
+
+    // ─── Route History API ────────────────────────────────────────────────────
+
+    async fetchEmployeeRoute(employeeId, date, startTime, endTime) {
+        try {
+            let url = `/api/tracking/employee-route/?employee_id=${encodeURIComponent(employeeId)}&date=${encodeURIComponent(date)}`;
+            if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
+            if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
+
+            const resp = await fetch(url, {
+                headers: {
+                    'X-CSRFToken': this._getCSRFToken(),
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (!resp.ok) throw new Error('API error ' + resp.status);
+            const json = await resp.json();
+            // Response format: { success: true, data: { locations: [...], total_distance_km: ..., ... } }
+            if (json && json.data) {
+                return json.data;
+            }
+            return json;
+        } catch (e) {
+            console.error('fetchEmployeeRoute error:', e);
+            throw e;
+        }
     }
 
     // ─── Route Drawing ────────────────────────────────────────────────────────
@@ -152,7 +187,7 @@ class MapTracking {
         if (!this.map || !locations || locations.length === 0) return;
 
         // Clear existing route
-        this._clearRoute();
+        this._clearRoutePolyline();
 
         const latLngs = locations
             .map(loc => {
@@ -179,7 +214,7 @@ class MapTracking {
         if (!this.map || !locations || locations.length === 0) return;
 
         // Remove old route markers
-        this.routeMarkers.forEach(m => this.map.removeLayer(m));
+        this.routeMarkers.forEach(m => { if (this.map) this.map.removeLayer(m); });
         this.routeMarkers = [];
 
         const first = locations[0];
@@ -187,29 +222,31 @@ class MapTracking {
 
         const startIcon = L.divIcon({
             className: '',
-            html: '<div style="background:#10b981;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff"><i class="fas fa-play"></i></div>',
+            html: '<div style="background:#10b981;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff"><i class="fas fa-play"></i></div>',
             iconSize: [28, 28],
             iconAnchor: [14, 14]
         });
         const endIcon = L.divIcon({
             className: '',
-            html: '<div style="background:#ef4444;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff"><i class="fas fa-flag-checkered"></i></div>',
+            html: '<div style="background:#ef4444;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:12px;box-shadow:0 2px 6px rgba(0,0,0,0.3);border:2px solid #fff"><i class="fas fa-flag-checkered"></i></div>',
             iconSize: [28, 28],
             iconAnchor: [14, 14]
         });
 
-        const startLatLng = [parseFloat(first.latitude), parseFloat(first.longitude)];
-        const endLatLng = [parseFloat(last.latitude), parseFloat(last.longitude)];
+        const startLat = parseFloat(first.latitude);
+        const startLng = parseFloat(first.longitude);
+        const endLat = parseFloat(last.latitude);
+        const endLng = parseFloat(last.longitude);
 
-        if (!isNaN(startLatLng[0]) && !isNaN(startLatLng[1])) {
-            const sm = L.marker(startLatLng, { icon: startIcon })
+        if (!isNaN(startLat) && !isNaN(startLng)) {
+            const sm = L.marker([startLat, startLng], { icon: startIcon })
                 .bindPopup('<b>Start</b><br>' + this.formatTimestamp(first.timestamp || first.created_at));
             sm.addTo(this.map);
             this.routeMarkers.push(sm);
         }
 
-        if (!isNaN(endLatLng[0]) && !isNaN(endLatLng[1])) {
-            const em = L.marker(endLatLng, { icon: endIcon })
+        if (!isNaN(endLat) && !isNaN(endLng)) {
+            const em = L.marker([endLat, endLng], { icon: endIcon })
                 .bindPopup('<b>End</b><br>' + this.formatTimestamp(last.timestamp || last.created_at));
             em.addTo(this.map);
             this.routeMarkers.push(em);
@@ -249,10 +286,6 @@ class MapTracking {
                 this.map.panTo([lat, lng], { animate: true, duration: 0.5 });
             }
 
-            if (this.onProgressCallback) {
-                this.onProgressCallback(this.currentPlaybackIndex, locations.length);
-            }
-
             if (typeof updateProgress === 'function') {
                 updateProgress(this.currentPlaybackIndex + 1, locations.length);
             }
@@ -276,15 +309,34 @@ class MapTracking {
         this.playbackSpeed = speed;
         if (this.isPlaying) {
             this.stopPlayback();
-            // Restart from the page-level function which checks isPlaying
         }
     }
 
     jumpToLocation(index) {
-        if (!this.map || !index && index !== 0) return;
+        if (!this.map || (index === null && index !== 0)) return;
         this.currentPlaybackIndex = index;
         if (typeof highlightTimelineItem === 'function') {
             highlightTimelineItem(index);
+        }
+    }
+
+    // ─── Loading State ────────────────────────────────────────────────────────
+
+    showLoading(containerId) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        el.innerHTML = `
+            <div class="text-center py-4 text-muted">
+                <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+                Loading...
+            </div>`;
+    }
+
+    hideLoading(containerId, html) {
+        const el = document.getElementById(containerId);
+        if (!el) return;
+        if (html !== undefined) {
+            el.innerHTML = html;
         }
     }
 
@@ -323,13 +375,11 @@ class MapTracking {
 
     // ─── Private Helpers ──────────────────────────────────────────────────────
 
-    _clearRoute() {
+    _clearRoutePolyline() {
         if (this.routePolyline && this.map) {
             this.map.removeLayer(this.routePolyline);
             this.routePolyline = null;
         }
-        this.routeMarkers.forEach(m => { if (this.map) this.map.removeLayer(m); });
-        this.routeMarkers = [];
     }
 
     _getInitials(name) {
@@ -341,8 +391,8 @@ class MapTracking {
 
     _employeeColor(id) {
         const colors = ['#2563eb', '#7c3aed', '#db2777', '#dc2626', '#d97706', '#059669', '#0891b2'];
-        const idx = Math.abs(parseInt(id, 10) || 0) % colors.length;
-        return colors[idx];
+        const num = parseInt(String(id).replace(/\D/g, '').slice(-4) || '0', 10);
+        return colors[Math.abs(num) % colors.length];
     }
 
     _createEmployeeIcon(initials, color) {
@@ -360,12 +410,12 @@ class MapTracking {
         const dept = loc.department || '';
         const desg = loc.designation || '';
         const time = this.formatTimestamp(loc.timestamp || loc.last_seen);
-        const lat = parseFloat(loc.latitude).toFixed(6);
-        const lng = parseFloat(loc.longitude).toFixed(6);
+        const lat = parseFloat(loc.latitude || 0).toFixed(6);
+        const lng = parseFloat(loc.longitude || 0).toFixed(6);
         return `
             <div style="min-width:160px">
                 <strong>${name}</strong><br>
-                ${dept ? '<small class="text-muted">' + dept + (desg ? ' · ' + desg : '') + '</small><br>' : ''}
+                ${dept ? `<small class="text-muted">${dept}${desg ? ' &middot; ' + desg : ''}</small><br>` : ''}
                 <small><i class="fas fa-clock"></i> ${time}</small><br>
                 <small class="text-muted">${lat}, ${lng}</small>
             </div>
@@ -375,8 +425,8 @@ class MapTracking {
     _getCSRFToken() {
         const cookies = document.cookie.split(';');
         for (let c of cookies) {
-            const [name, value] = c.trim().split('=');
-            if (name === 'csrftoken') return decodeURIComponent(value);
+            const parts = c.trim().split('=');
+            if (parts[0] === 'csrftoken') return decodeURIComponent(parts[1] || '');
         }
         const meta = document.querySelector('meta[name=csrf-token]');
         return meta ? meta.getAttribute('content') : '';
