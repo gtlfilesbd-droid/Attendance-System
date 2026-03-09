@@ -612,6 +612,8 @@ def live_locations(request):
                 'employee_id': loc['employee_id'],
                 'employee_name': loc['employee_name'],
                 'employee_code': loc.get('employee_code', ''),
+                'department': loc.get('department', ''),
+                'designation': loc.get('designation', ''),
                 'location': {
                     'lat': loc['latitude'],
                     'lng': loc['longitude']
