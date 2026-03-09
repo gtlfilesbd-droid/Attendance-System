@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import threading
 import time as time_module
 import urllib.request
 import urllib.parse
@@ -30,6 +31,12 @@ from django.conf import settings
 from decimal import Decimal
 
 logger = logging.getLogger('tracking')
+
+# Module-level semaphore: only 1 background geocoding thread at a time (Nominatim = 1 req/sec)
+_geocode_sem = threading.Semaphore(1)
+# Cooldown tracker: loc_id → last_attempt_timestamp (avoid retrying same location every poll)
+_geocode_last_attempt: dict = {}
+_GEOCODE_RETRY_COOLDOWN = 600  # 10 minutes between retries for the same location
 
 
 def _hours_to_hhmmss(hours):
@@ -103,7 +110,7 @@ def _reverse_geocode(lat, lon):
                 'addressdetails': 1,
                 'zoom': 18,
             })
-            req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'})
+            req = urllib.request.Request(url, headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (anam.genesisengineering@gmail.com)'})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
             addr = data.get('address')
@@ -144,7 +151,7 @@ def _reverse_geocode_photon(lat, lon):
             })
             req = urllib.request.Request(
                 url,
-                headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (contact@example.com)'},
+                headers={'User-Agent': 'GenesisEmployeeAttendance/1.0 (anam.genesisengineering@gmail.com)'},
             )
             with urllib.request.urlopen(req, timeout=8) as resp:
                 data = json.loads(resp.read().decode())
@@ -553,57 +560,108 @@ def live_locations(request):
         if not getattr(request.user, 'is_superuser', False):
             permitted = get_permitted_departments(request.user)
             logs_qs = logs_qs.filter(employee__department__in=permitted)
-        latest_timestamps = logs_qs.values('employee').annotate(
-            latest_time=Max('timestamp')
+
+        # Step 1: One query to get each employee's latest timestamp
+        latest_map = {
+            item['employee']: item['latest_time']
+            for item in logs_qs.values('employee').annotate(latest_time=Max('timestamp'))
+        }
+        if not latest_map:
+            return Response({
+                'success': True,
+                'data': {
+                    'locations': [],
+                    'count': 0,
+                    'last_updated': timezone.now().isoformat(),
+                    'time_window_minutes': 15
+                }
+            })
+
+        # Step 2: One bulk query to fetch all the actual LocationLog records (fixes N+1)
+        from django.db.models import Q
+        import functools
+        import operator
+        bulk_filter = functools.reduce(
+            operator.or_,
+            (Q(employee_id=emp_id, timestamp=ts) for emp_id, ts in latest_map.items())
         )
+        location_qs = (
+            LocationLog.objects
+            .filter(bulk_filter)
+            .select_related('employee', 'employee__department', 'employee__designation')
+        )
+        # Keep only the latest per employee (in case of ties)
+        seen_employees = set()
+        location_records = []
+        for loc in location_qs:
+            if loc.employee_id not in seen_employees:
+                seen_employees.add(loc.employee_id)
+                location_records.append(loc)
 
-        # Fetch the actual location records
-        locations = []
-        for idx, item in enumerate(latest_timestamps):
-            location = LocationLog.objects.filter(
-                employee_id=item['employee'],
-                timestamp=item['latest_time']
-            ).select_related('employee', 'employee__department', 'employee__designation').first()
-
-            if location and location.employee.is_active:
-                ts = location.timestamp
-                ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
-                employee = location.employee
-                profile_picture_url = None
-                if employee.profile_picture:
-                    try:
-                        profile_picture_url = request.build_absolute_uri(employee.profile_picture.url)
-                    except Exception:
-                        profile_picture_url = None
-                address = ''
+        def _bg_fill_address(loc_id, lat, lon):
+            with _geocode_sem:
+                time_module.sleep(1.1)  # respect Nominatim 1 req/sec rate limit
                 try:
-                    if idx > 0:
-                        time_module.sleep(1)  # Nominatim allows 1 req/sec
-                    address = get_display_address(location.latitude, location.longitude)
-                    if address and not _is_coordinates_only(address):
-                        location.address = address
-                        location.save(update_fields=['address'])
-                except Exception as e:
-                    logger.warning('live_locations geocode for employee %s: %s', getattr(employee, 'id'), e)
-                if not address or _is_coordinates_only(address):
-                    address = '—'
-                locations.append({
-                    'employee_id': str(employee.id),
-                    'employee_name': employee.name,
-                    'employee_code': employee.employee_id,
-                    'department': employee.department.name if employee.department else '—',
-                    'designation': employee.designation.name if employee.designation else '—',
-                    'latitude': location.latitude,
-                    'longitude': location.longitude,
-                    'accuracy': location.accuracy,
-                    'battery_level': location.battery_level,
-                    'speed': location.speed,
-                    'address': address or '',
-                    'timestamp': ts_iso,
-                    'last_update': _get_time_ago(location.timestamp),
-                    'minutes_ago': int((timezone.now() - location.timestamp).total_seconds() / 60),
-                    'profile_picture_url': profile_picture_url,
-                })
+                    addr = get_display_address(lat, lon)
+                    if addr and not _is_coordinates_only(addr):
+                        LocationLog.objects.filter(id=loc_id).update(address=addr)
+                        _geocode_last_attempt.pop(loc_id, None)  # reset cooldown on success
+                except Exception:
+                    pass
+
+        # Step 3: Build response — use stored address, background-geocode only when missing
+        now = timezone.now()
+        now_ts = time_module.time()
+        locations = []
+        for location in location_records:
+            employee = location.employee
+            if not employee.is_active:
+                continue
+
+            ts = location.timestamp
+            ts_iso = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+
+            profile_picture_url = None
+            if employee.profile_picture:
+                try:
+                    profile_picture_url = request.build_absolute_uri(employee.profile_picture.url)
+                except Exception:
+                    profile_picture_url = None
+
+            # Use stored address from DB — no external API call, no sleep
+            stored = location.address
+            if stored and stored.strip() and not _is_coordinates_only(stored):
+                address = stored
+            else:
+                # Address missing: show coordinates as fallback so user sees something useful
+                address = f'{location.latitude:.5f}, {location.longitude:.5f}'
+                # Launch background geocoding only if cooldown has passed (avoid Nominatim spam)
+                last_attempt = _geocode_last_attempt.get(location.id, 0)
+                if now_ts - last_attempt >= _GEOCODE_RETRY_COOLDOWN:
+                    _geocode_last_attempt[location.id] = now_ts
+                    threading.Thread(
+                        target=_bg_fill_address,
+                        args=(location.id, location.latitude, location.longitude),
+                        daemon=True,
+                    ).start()
+
+            locations.append({
+                'employee_id': str(employee.id),
+                'employee_name': employee.name,
+                'employee_code': employee.employee_id,
+                'department': employee.department.name if employee.department else '—',
+                'designation': employee.designation.name if employee.designation else '—',
+                'latitude': location.latitude,
+                'longitude': location.longitude,
+                'accuracy': location.accuracy,
+                'battery_level': location.battery_level,
+                'speed': location.speed,
+                'address': address,
+                'timestamp': ts_iso,
+                'last_update': _get_time_ago(location.timestamp),
+                'minutes_ago': int((now - location.timestamp).total_seconds() / 60),
+                'profile_picture_url': profile_picture_url,
+            })
 
         # Format for Leaflet.js/OpenStreetMap (and flat-list consumers)
         formatted_locations = []
