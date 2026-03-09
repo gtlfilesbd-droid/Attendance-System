@@ -155,22 +155,33 @@ class RouteHistorySerializer(serializers.Serializer):
         Static method to fetch and process route history
         """
         from employees.models import Employee
-        from django.contrib.gis.measure import Distance
-        
+        from django.db.models import Q
+
         # Get employee
         try:
             employee = Employee.objects.get(id=employee_id)
         except Employee.DoesNotExist:
             return None
-        
-        # Get location logs in range
-        locations = LocationLog.objects.filter(
-            employee=employee,
-            timestamp__gte=start_datetime,
-            timestamp__lte=end_datetime
-        ).order_by('timestamp')
-        
-        if not locations.exists():
+
+        MAX_ACCURACY_METERS = 150.0
+
+        # Base queryset — only fetch fields we actually need
+        base_qs = (
+            LocationLog.objects
+            .filter(employee=employee, timestamp__gte=start_datetime, timestamp__lte=end_datetime)
+            .only('id', 'location', 'timestamp', 'accuracy', 'battery_level', 'speed', 'address')
+            .order_by('timestamp')
+        )
+
+        # SQL-level accuracy filter (single DB round-trip, no Python-side loop)
+        filtered_qs = base_qs.filter(Q(accuracy__isnull=True) | Q(accuracy__lte=MAX_ACCURACY_METERS))
+        locations_list = list(filtered_qs)
+
+        # Fall back to unfiltered only when too few accurate points (preserves original behaviour)
+        if len(locations_list) < 2:
+            locations_list = list(base_qs)
+
+        if not locations_list:
             return {
                 'employee': str(employee.id),
                 'employee_name': employee.name,
@@ -187,13 +198,6 @@ class RouteHistorySerializer(serializers.Serializer):
                 'avg_speed_kmh_computed': None,
                 'avg_speed_kmh_device': None,
             }
-        
-        # Optional: exclude very bad accuracy points from route (reduces zigzag from noisy GPS)
-        MAX_ACCURACY_METERS = 150.0
-        locations_list = list(locations)
-        filtered = [loc for loc in locations_list if getattr(loc, 'accuracy', None) is None or float(loc.accuracy) <= MAX_ACCURACY_METERS]
-        if len(filtered) >= 2:
-            locations_list = filtered
         # Calculate total distance and per-segment distance/speed
         # PostGIS Geography .distance() returns meters (no * 111320)
         total_distance = 0

@@ -876,8 +876,18 @@ def employee_route(request):
     
     # Format locations for frontend (get_route_history already returns list of dicts)
     if route_data and 'locations' in route_data:
+        # Decimate to at most 1000 display points — stats (total_distance, avg_speed) are
+        # already computed on the full list inside get_route_history, so accuracy is preserved.
+        MAX_DISPLAY_POINTS = 1000
+        locations_raw = route_data['locations']
+        n = len(locations_raw)
+        if n > MAX_DISPLAY_POINTS:
+            step = (n - 1) / (MAX_DISPLAY_POINTS - 1)
+            indices = sorted({0, n - 1} | {round(i * step) for i in range(MAX_DISPLAY_POINTS)})
+            locations_raw = [locations_raw[i] for i in indices]
+
         formatted_locations = []
-        for loc in route_data['locations']:
+        for loc in locations_raw:
             lat = loc.get('latitude')
             lng = loc.get('longitude')
             if lat is not None and lng is not None:
