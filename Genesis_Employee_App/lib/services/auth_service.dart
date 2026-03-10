@@ -28,11 +28,12 @@ class AuthService {
 
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
-  /// SharedPreferences key for background-isolate-readable token backup.
+  /// SharedPreferences keys for background-isolate-readable token backups.
   /// Background Flutter engines cannot reliably access FlutterSecureStorage
-  /// (plugin channel conflict in multi-engine setup), so we keep a plain-prefs
-  /// copy that both the main and background isolates can read.
+  /// (plugin channel conflict in multi-engine setup), so we keep plain-prefs
+  /// copies that both the main and background isolates can read.
   static const String _bgTokenKey = 'bg_auth_token';
+  static const String _bgRefreshTokenKey = 'bg_refresh_token';
 
   /// Guard key stored in SharedPreferences (always wiped by "Clear Data" in
   /// App Info, unlike Android Keystore entries which survive on many OEMs).
@@ -50,7 +51,19 @@ class AuthService {
   Future<void> ensureStorageIntegrity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.containsKey(_storageGuardKey)) return; // normal launch — nothing to do
+      if (prefs.containsKey(_storageGuardKey)) {
+        // Normal launch — migrate refresh token backup if missing (one-time,
+        // covers upgrades from versions that only backed up the access token).
+        if (!prefs.containsKey(_bgRefreshTokenKey)) {
+          try {
+            final rt = await _storage.read(key: AppConfig.refreshTokenKey);
+            if (rt != null && rt.isNotEmpty) {
+              await prefs.setString(_bgRefreshTokenKey, rt);
+            }
+          } catch (_) {}
+        }
+        return;
+      }
 
       // Guard absent: SharedPreferences was wiped (Clear Data or fresh install).
       // Purge Keystore remnants so stale tokens cannot bypass the login screen.
@@ -59,6 +72,9 @@ class AuthService {
       } catch (_) {}
       try {
         await prefs.remove(_bgTokenKey);
+      } catch (_) {}
+      try {
+        await prefs.remove(_bgRefreshTokenKey);
       } catch (_) {}
     } catch (_) {}
   }
@@ -86,10 +102,14 @@ class AuthService {
 
         await _storage.write(key: AppConfig.tokenKey, value: access);
         await _storage.write(key: AppConfig.refreshTokenKey, value: refresh);
-        // Also persist token in SharedPreferences so the background isolate can read it.
+        // Also persist tokens in SharedPreferences so the background isolate and
+        // OEM-Keystore-failure fallback can read them.
         try {
           final prefs = await SharedPreferences.getInstance();
           await prefs.setString(_bgTokenKey, access as String);
+          if (refresh != null) {
+            await prefs.setString(_bgRefreshTokenKey, refresh as String);
+          }
         } catch (_) {}
         if (employee != null) {
           await _storage.write(key: 'employee_data', value: jsonEncode(employee));
@@ -136,6 +156,7 @@ class AuthService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_bgTokenKey);
+      await prefs.remove(_bgRefreshTokenKey);
     } catch (_) {}
     
     // Stop background location service
@@ -203,15 +224,28 @@ class AuthService {
   }
 
   /// Get stored refresh token.
-  /// Returns null when FlutterSecureStorage is unavailable (e.g. background
-  /// isolate Keystore conflict); callers should treat null as a transient error,
-  /// NOT as "token does not exist", to avoid a false TOKEN_REFRESH_FAILED logout.
+  /// Tries FlutterSecureStorage with retry (handles Keystore sluggishness after
+  /// process restart on some OEMs), then falls back to SharedPreferences backup.
+  /// Returns null only when both storage layers have no token.
   Future<String?> getRefreshToken() async {
-    try {
-      return await _storage.read(key: AppConfig.refreshTokenKey);
-    } catch (_) {
-      return null;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final token = await _storage.read(key: AppConfig.refreshTokenKey);
+        if (token != null && token.isNotEmpty) return token;
+        break; // null = key genuinely absent, retrying won't help
+      } catch (_) {
+        if (attempt < 2) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
     }
+    // Fallback: SharedPreferences backup (reliable across all OEMs and isolates)
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final bg = prefs.getString(_bgRefreshTokenKey);
+      if (bg != null && bg.isNotEmpty) return bg;
+    } catch (_) {}
+    return null;
   }
 
   /// Refresh access token using refresh token.
@@ -256,10 +290,13 @@ class AuthService {
           if (data['refresh'] != null) {
             await _storage.write(key: AppConfig.refreshTokenKey, value: data['refresh'].toString());
           }
-          // Keep SharedPreferences copy in sync
+          // Keep SharedPreferences copies in sync (access + refresh backups)
           try {
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString(_bgTokenKey, access.toString());
+            if (data['refresh'] != null) {
+              await prefs.setString(_bgRefreshTokenKey, data['refresh'].toString());
+            }
           } catch (_) {}
           return RefreshResult.success;
         }
