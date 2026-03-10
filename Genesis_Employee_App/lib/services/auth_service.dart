@@ -43,30 +43,42 @@ class AuthService {
   /// Detects and purges stale Keystore tokens left over from a previous install
   /// or after "Clear Data" in App Info on OEMs where Keystore survives the wipe.
   ///
-  /// Strategy: SharedPreferences is ALWAYS cleared by "Clear Data" / uninstall,
-  /// whereas Android Keystore entries can persist on TECNO, Xiaomi, and other
-  /// Chinese OEMs.  If the guard key is absent in SharedPreferences but tokens
-  /// are still readable from FlutterSecureStorage, the storage is stale and must
-  /// be purged so the app shows the login screen instead of a dead session.
+  /// Two-layer detection:
+  /// 1. Guard key absent in SharedPreferences → definitely wiped (Clear Data /
+  ///    fresh install without auto-backup) → purge everything.
+  /// 2. Guard key present BUT SharedPreferences token backups are missing →
+  ///    guard was restored by Android Auto Backup but real tokens are gone →
+  ///    purge Keystore remnants and reset the guard so login screen is shown.
   Future<void> ensureStorageIntegrity() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+
       if (prefs.containsKey(_storageGuardKey)) {
-        // Normal launch — migrate refresh token backup if missing (one-time,
-        // covers upgrades from versions that only backed up the access token).
-        if (!prefs.containsKey(_bgRefreshTokenKey)) {
-          try {
-            final rt = await _storage.read(key: AppConfig.refreshTokenKey);
-            if (rt != null && rt.isNotEmpty) {
-              await prefs.setString(_bgRefreshTokenKey, rt);
-            }
-          } catch (_) {}
+        // Guard present — could be normal launch OR Android Auto Backup restored
+        // the guard after uninstall/reinstall.  Check if our token backups
+        // (which we write on every login/refresh) also survived.  If the guard
+        // exists but the token backups do NOT, the guard was restored from
+        // cloud backup after a reinstall and the session is stale.
+        final hasAccessBackup = prefs.containsKey(_bgTokenKey);
+        final hasRefreshBackup = prefs.containsKey(_bgRefreshTokenKey);
+        if (hasAccessBackup || hasRefreshBackup) {
+          // Genuine session — migrate refresh backup if missing (one-time,
+          // covers upgrades from versions that only backed up the access token).
+          if (!hasRefreshBackup) {
+            try {
+              final rt = await _storage.read(key: AppConfig.refreshTokenKey);
+              if (rt != null && rt.isNotEmpty) {
+                await prefs.setString(_bgRefreshTokenKey, rt);
+              }
+            } catch (_) {}
+          }
+          return;
         }
-        return;
+        // Guard restored from backup but token backups absent → stale session.
+        // Fall through to purge.
       }
 
-      // Guard absent: SharedPreferences was wiped (Clear Data or fresh install).
-      // Purge Keystore remnants so stale tokens cannot bypass the login screen.
+      // Guard absent OR stale backup-restored guard: purge all token remnants.
       try {
         await _storage.deleteAll();
       } catch (_) {}
@@ -75,6 +87,9 @@ class AuthService {
       } catch (_) {}
       try {
         await prefs.remove(_bgRefreshTokenKey);
+      } catch (_) {}
+      try {
+        await prefs.remove(_storageGuardKey);
       } catch (_) {}
     } catch (_) {}
   }

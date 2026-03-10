@@ -1,0 +1,22 @@
+📦 New Version Available: Genesis v3.0.1.apk
+
+এই আপডেটে ফোনে Duty OFF থাকার সময় অ্যাপ ব্যবহার না হওয়া এবং Clear Data দিতে হত এমন সমস্যা সমাধান করা হয়েছে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔹 Token Storage Fix (Duty OFF Unusable Issue)
+কিছু OEM ফোনে Duty OFF থাকার সময় অ্যাপ খুললে কিছু কাজ করত না — Profile, Attendance ইত্যাদি লোড হত না এবং Clear Data + আবার Login করলেই ঠিক হত। এই সমস্যা ঠিক করা হয়েছে।
+— এখন Refresh Token-এরও Backup রাখা হবে (SharedPreferences-এ), ঠিক Access Token-এর মতো।
+— ফলে Keystore fail করলেও অ্যাপ সঠিকভাবে কাজ করবে।
+— User নিজে Logout না করলে অ্যাপে Logged-in অবস্থায় থাকবেন।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎥 আপডেট করার নিয়ম:
+
+🔹 Step 1: আগে আপনার মোবাইল থেকে পুরোনো Genesis অ্যাপটি Uninstall করুন।
+🔹 Step 2: তারপর নতুন ভার্সন Genesis v3.0.1.apk Install করুন।
+
+⚠️ সরাসরি নতুন অ্যাপ ইনস্টল করবেন না। আগে পুরোনো অ্যাপটি আনইনস্টল করা বাধ্যতামূলক।
+
+ধন্যবাদ। 🚀
