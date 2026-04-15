@@ -19,6 +19,7 @@ class MapTracking {
         this.onLocationChange = null;
         this.onPlaybackComplete = null;
         this._panAnimationId = null;
+        this._baseTileLayer = null;
     }
 
     /**
@@ -54,6 +55,72 @@ class MapTracking {
     // --- Live map ---
 
     /**
+     * Build a Leaflet TileLayer subclass that sets referrerpolicy="origin" on
+     * every tile <img> element.  This is the only reliable way to force the
+     * browser to include the Referer/Origin header with cross-origin tile
+     * requests — Leaflet's standard L.tileLayer options have no referrerPolicy
+     * support, so we must override createTile().
+     */
+    _makeReferrerTileLayer(url, options) {
+        const ReferrerTileLayer = L.TileLayer.extend({
+            createTile(coords, done) {
+                const img = L.TileLayer.prototype.createTile.call(this, coords, done);
+                img.referrerPolicy = 'origin';
+                return img;
+            },
+        });
+        return new ReferrerTileLayer(url, options);
+    }
+
+    /**
+     * Create a resilient base tile layer.
+     * Primary  : OpenStreetMap (with referrerpolicy="origin" on every tile img)
+     * Fallback : CARTO basemaps (identical referrer fix)
+     *
+     * OSM volunteer servers require the Referer header.  Django's
+     * SecurityMiddleware defaults to Referrer-Policy: same-origin, which strips
+     * the header on cross-origin requests.  Setting referrerpolicy on the img
+     * element overrides the document policy for that individual request.
+     */
+    createBaseTileLayer() {
+        const osmUrl  = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+        const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+        const cartoUrl  = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+        const cartoAttr = osmAttr + ' &copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+        const layer = this._makeReferrerTileLayer(osmUrl, {
+            attribution: osmAttr,
+            maxZoom: 19,
+        });
+
+        let tileErrorCount = 0;
+        let hasFallenBack  = false;
+        layer.on('tileerror', () => {
+            tileErrorCount += 1;
+            if (!hasFallenBack && tileErrorCount >= 3) {
+                hasFallenBack = true;
+                try {
+                    if (this.map) {
+                        this.map.removeLayer(layer);
+                        const fb = this._makeReferrerTileLayer(cartoUrl, {
+                            subdomains: 'abcd',
+                            attribution: cartoAttr,
+                            maxZoom: 19,
+                        });
+                        fb.addTo(this.map);
+                        this._baseTileLayer = fb;
+                    }
+                } catch (e) {
+                    console.warn('Map tile fallback failed:', e);
+                }
+            }
+        });
+
+        return layer;
+    }
+
+    /**
      * Initialize Leaflet map for live tracking (OpenStreetMap tiles)
      * @param {string} mapElementId - ID of the map container element
      * @param {object} options - Optional map options (center, zoom)
@@ -65,9 +132,8 @@ class MapTracking {
         const center = options.center || [23.8103, 90.4125];
         const zoom = options.zoom || 12;
         this.map = L.map(mapElementId).setView(center, zoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        }).addTo(this.map);
+        this._baseTileLayer = this.createBaseTileLayer();
+        this._baseTileLayer.addTo(this.map);
         this.markers = {};
         return Promise.resolve();
     }
@@ -275,9 +341,8 @@ class MapTracking {
         const center = options.center || [23.8103, 90.4125];
         const zoom = options.zoom || 12;
         this.map = L.map(mapElementId).setView(center, zoom);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-        }).addTo(this.map);
+        this._baseTileLayer = this.createBaseTileLayer();
+        this._baseTileLayer.addTo(this.map);
         this.routePolyline = null;
         this.routeMarkers = [];
         return Promise.resolve();

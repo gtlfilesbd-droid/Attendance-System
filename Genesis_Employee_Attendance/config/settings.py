@@ -274,6 +274,12 @@ CORS_ALLOW_HEADERS = [
 # Optional: Google Maps API key (for any map widgets or geocoding)
 GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
 
+# Referrer policy: send origin URL on cross-origin HTTPS requests so that
+# third-party tile servers (OpenStreetMap) receive the required Referer header.
+# Django's SecurityMiddleware defaults to "same-origin" which strips Referer
+# on cross-origin requests, causing OSM to return 403 "Referer required".
+SECURE_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+
 
 # Celery Configuration
 CELERY_BROKER_URL = config('CELERY_BROKER_URL', default='redis://localhost:6379/0')
