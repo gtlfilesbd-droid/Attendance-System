@@ -1,8 +1,34 @@
 from django.contrib import admin
+from django import forms
 from django.utils.safestring import mark_safe
 from config.admin_export import AdminExportMixin
 from .models import Employee, Department, Designation, DeviceToken
 from .department_permissions import get_permitted_departments
+
+
+class EmployeeAdminForm(forms.ModelForm):
+    """
+    Admin form that treats Employee.password as a raw password input.
+    - Leave blank to keep existing password (on change)
+    - If provided, it will be hashed in EmployeeAdmin.save_model()
+    """
+
+    password = forms.CharField(
+        label='Password',
+        required=False,
+        widget=forms.PasswordInput(render_value=False, attrs={'autocomplete': 'new-password'}),
+        help_text='Leave blank to keep the current password.',
+    )
+
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Never show the stored hash in the form
+        if 'password' in self.fields:
+            self.fields['password'].initial = ''
 
 
 @admin.register(Department)
@@ -49,6 +75,7 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
     search_fields = ['employee_id', 'name', 'email', 'phone', 'department__name', 'designation__name']
     ordering = ['-created_at']
     readonly_fields = ['id', 'created_at', 'updated_at', 'profile_picture_preview']
+    form = EmployeeAdminForm
     
     fieldsets = (
         ('Profile', {
@@ -102,7 +129,10 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
     
     def save_model(self, request, obj, form, change):
-        # Hash password if it's being set/changed
+        # Hash password if it's being set/changed (and not blank).
+        # Blank means "keep existing password".
         if 'password' in form.changed_data:
-            obj.set_password(form.cleaned_data['password'])
+            raw = (form.cleaned_data.get('password') or '').strip()
+            if raw:
+                obj.set_password(raw)
         super().save_model(request, obj, form, change)

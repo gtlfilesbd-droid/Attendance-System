@@ -1,0 +1,12 @@
+.cursor/
+**/debug.log
+**/logs/
+**/__pycache__/
+*.py[cod]
+*.log
+.env
+.venv
+venv/
+env/
+.DS_Store
+Thumbs.db

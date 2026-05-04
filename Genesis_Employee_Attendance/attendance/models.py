@@ -11,6 +11,7 @@ class Attendance(models.Model):
         ('LATE', 'Late'),
         ('HALF_DAY', 'Half-Day'),
         ('ABSENT', 'Absent'),
+        ('LEAVE', 'Leave'),
     ]
     
     # Auto-increment primary key (default)
@@ -137,3 +138,45 @@ class DutySession(models.Model):
 
     def __str__(self):
         return f"{self.employee.name} - {self.date} - {self.start_time}"
+
+
+class LeaveAssignment(models.Model):
+    """
+    Admin-managed leave assignment for an employee.
+    When a leave is assigned, the employee should not be counted as ABSENT.
+    We materialize leave into per-day Attendance rows (status=LEAVE) for reporting.
+    """
+
+    id = models.AutoField(primary_key=True)
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name='leave_assignments',
+        db_index=True,
+    )
+    start_date = models.DateField(db_index=True)
+    end_date = models.DateField(db_index=True)
+    reason = models.CharField(max_length=255, blank=True, default='')
+    created_by = models.ForeignKey(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='leave_assignments_created',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'leave_assignments'
+        ordering = ['-start_date', '-created_at']
+        verbose_name = 'Leave Assignment'
+        verbose_name_plural = 'Leave Assignments'
+        indexes = [
+            models.Index(fields=['employee', 'start_date'], name='idx_leave_emp_start'),
+            models.Index(fields=['employee', 'end_date'], name='idx_leave_emp_end'),
+        ]
+
+    def __str__(self):
+        r = f"{self.employee} ({self.start_date} to {self.end_date})"
+        return f"{r} - {self.reason}" if self.reason else r
