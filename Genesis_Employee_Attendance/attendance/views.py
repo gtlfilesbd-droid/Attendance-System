@@ -599,6 +599,14 @@ def all_attendance(request):
                     date__gte=start_date, date__lte=end_date, employee_id__in=in_scope_ids
                 ).values_list('employee_id', 'date')
             )
+            open_pairs = set(
+                DutySession.objects.filter(
+                    date__gte=start_date,
+                    date__lte=end_date,
+                    employee_id__in=in_scope_ids,
+                    end_time__isnull=True,
+                ).values_list('employee_id', 'date')
+            )
 
             # Exclude leave-covered days
             from attendance.leave_utils import existing_pairs_from_leave_assignments
@@ -626,6 +634,7 @@ def all_attendance(request):
                     emp = emp_cache.get(emp_id)
                     if not emp:
                         continue
+                    duty_status = 'on_duty' if (emp_id, d) in open_pairs else 'off_duty'
                     synthetic_present.append({
                         'id': None,
                         'employee': str(emp.id),
@@ -648,8 +657,7 @@ def all_attendance(request):
                         'check_in_time_str': None,
                         'check_out_time_str': None,
                         'total_hours_str': None,
-                        # DutySession exists, so this will show as off_duty unless front-end uses duty_status
-                        'duty_status': 'off_duty',
+                        'duty_status': duty_status,
                         'remarks': 'Synthetic present (from duty sessions)',
                         'created_at': None,
                         'updated_at': None,
