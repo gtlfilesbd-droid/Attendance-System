@@ -181,6 +181,15 @@
     </div>
     <div class="col-6 col-lg">
         <div class="stat-card">
+            <div class="icon" style="background: rgba(139, 92, 246, 0.12); color: #7c3aed;">
+                <i class="fas fa-umbrella-beach"></i>
+            </div>
+            <div class="value" id="summaryLeave">0</div>
+            <div class="label">Leave</div>
+        </div>
+    </div>
+    <div class="col-6 col-lg">
+        <div class="stat-card">
             <div class="icon" style="background: rgba(239, 68, 68, 0.1); color: var(--danger);">
                 <i class="fas fa-times-circle"></i>
             </div>
@@ -338,6 +347,7 @@
 
     // Single source of truth for duty status - used by both cards and graph
     function getDutyStatus(r) {
+        if (r.duty_status === 'leave' || r.status === 'LEAVE') return 'leave';
         if (r.duty_status) return r.duty_status;
         if (r.status === 'ABSENT') return 'absent';
         if (r.status === 'LATE' || r.status === 'PRESENT' || r.status === 'HALF_DAY') return 'off_duty';
@@ -360,16 +370,18 @@
 
     function computeAggregatedCounts() {
         const dateGroups = {};
-        const unspecified = { on_duty: 0, off_duty: 0, absent: 0 };
+        const unspecified = { on_duty: 0, off_duty: 0, absent: 0, leave: 0 };
         reportData.forEach(record => {
             const dateKey = normalizeDateKey(record.date || (record.employee_details && record.employee_details.date));
-            const bucket = dateKey ? (dateGroups[dateKey] ||= { on_duty: 0, off_duty: 0, absent: 0 }) : unspecified;
+            const bucket = dateKey ? (dateGroups[dateKey] ||= { on_duty: 0, off_duty: 0, absent: 0, leave: 0 }) : unspecified;
             const ds = getDutyStatus(record);
-            bucket[ds]++;
+            const key = (ds === 'on_duty' || ds === 'off_duty' || ds === 'absent' || ds === 'leave') ? ds : 'absent';
+            bucket[key]++;
         });
         const onDuty = Object.values(dateGroups).reduce((s, g) => s + g.on_duty, 0) + unspecified.on_duty;
         const offDuty = Object.values(dateGroups).reduce((s, g) => s + g.off_duty, 0) + unspecified.off_duty;
         const absent = Object.values(dateGroups).reduce((s, g) => s + g.absent, 0) + unspecified.absent;
+        const leave = Object.values(dateGroups).reduce((s, g) => s + g.leave, 0) + unspecified.leave;
         // Build Trends from FULL date range (startDate..endDate) so sum always equals cards
         const startEl = document.getElementById('startDate');
         const endEl = document.getElementById('endDate');
@@ -378,6 +390,7 @@
         let dates = [];
         let onDutyData = [];
         let offDutyData = [];
+        let leaveData = [];
         let absentData = [];
         if (startStr && endStr && startStr <= endStr) {
             const start = new Date(startStr);
@@ -386,9 +399,10 @@
             for (let d = new Date(start); d <= end; d.setTime(d.getTime() + oneDay)) {
                 const key = d.toISOString().slice(0, 10);
                 dates.push(key);
-                const g = dateGroups[key] || { on_duty: 0, off_duty: 0, absent: 0 };
+                const g = dateGroups[key] || { on_duty: 0, off_duty: 0, absent: 0, leave: 0 };
                 onDutyData.push(g.on_duty);
                 offDutyData.push(g.off_duty);
+                leaveData.push(g.leave);
                 absentData.push(g.absent);
             }
         }
@@ -396,16 +410,22 @@
             dates = Object.keys(dateGroups).sort();
             onDutyData = dates.map(d => dateGroups[d].on_duty);
             offDutyData = dates.map(d => dateGroups[d].off_duty);
+            leaveData = dates.map(d => dateGroups[d].leave);
             absentData = dates.map(d => dateGroups[d].absent);
         }
-        const hasUnspecified = unspecified.on_duty + unspecified.off_duty + unspecified.absent > 0;
+        const hasUnspecified = unspecified.on_duty + unspecified.off_duty + unspecified.absent + unspecified.leave > 0;
         if (hasUnspecified) {
             dates.push('_unspecified');
             onDutyData.push(unspecified.on_duty);
             offDutyData.push(unspecified.off_duty);
+            leaveData.push(unspecified.leave);
             absentData.push(unspecified.absent);
         }
-        return { dateGroups, dates, onDutyData, offDutyData, absentData, onDuty, offDuty, absent, total: onDuty + offDuty + absent };
+        return {
+            dateGroups, dates, onDutyData, offDutyData, leaveData, absentData,
+            onDuty, offDuty, absent, leave,
+            total: onDuty + offDuty + absent + leave
+        };
     }
 
     function getTotalSessionsCount() {
@@ -462,6 +482,13 @@
                         tension: 0.4,
                         fill: true
                     }, {
+                        label: 'Leave',
+                        data: [],
+                        borderColor: '#7c3aed',
+                        backgroundColor: 'rgba(124, 58, 237, 0.12)',
+                        tension: 0.4,
+                        fill: true
+                    }, {
                         label: 'Absent',
                         data: [],
                         borderColor: '#ef4444',
@@ -488,10 +515,10 @@
             distributionChart = new Chart(distEl.getContext('2d'), {
                 type: 'doughnut',
                 data: {
-                    labels: ['On Duty', 'Off Duty', 'Absent'],
+                    labels: ['On Duty', 'Off Duty', 'Leave', 'Absent'],
                     datasets: [{
-                        data: [0, 0, 0],
-                        backgroundColor: ['#10b981', '#f59e0b', '#ef4444'],
+                        data: [0, 0, 0, 0],
+                        backgroundColor: ['#10b981', '#f59e0b', '#7c3aed', '#ef4444'],
                         borderWidth: 2,
                         borderColor: '#fff'
                     }]
@@ -660,6 +687,8 @@
         document.getElementById('summaryTotal').textContent = agg.total;
         document.getElementById('summaryOnDuty').textContent = agg.onDuty;
         document.getElementById('summaryOffDuty').textContent = agg.offDuty;
+        const leaveEl = document.getElementById('summaryLeave');
+        if (leaveEl) leaveEl.textContent = agg.leave;
         document.getElementById('summaryAbsent').textContent = agg.absent;
 
         const ctxLabel = document.getElementById('summaryContextLabel');
@@ -690,14 +719,17 @@
         trendChart.data.labels = agg.dates.map(d => d === '_unspecified' ? 'Other' : formatDateLabel(d));
         trendChart.data.datasets[0].data = agg.onDutyData;
         trendChart.data.datasets[1].data = agg.offDutyData;
-        trendChart.data.datasets[2].data = agg.absentData;
-        const maxVal = Math.max(...agg.onDutyData, ...agg.offDutyData, ...agg.absentData, 1);
+        trendChart.data.datasets[2].data = agg.leaveData;
+        trendChart.data.datasets[3].data = agg.absentData;
+        const maxVal = Math.max(
+            ...agg.onDutyData, ...agg.offDutyData, ...agg.leaveData, ...agg.absentData, 1
+        );
         if (trendChart.options.scales && trendChart.options.scales.y) {
             trendChart.options.scales.y.suggestedMax = Math.max(maxVal, 5);
         }
         trendChart.update();
 
-        distributionChart.data.datasets[0].data = [agg.onDuty, agg.offDuty, agg.absent];
+        distributionChart.data.datasets[0].data = [agg.onDuty, agg.offDuty, agg.leave, agg.absent];
         distributionChart.update();
     }
     

@@ -1,5 +1,8 @@
 from django.contrib import admin
 from django import forms
+from django.contrib import messages
+from django.core.exceptions import ValidationError
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from config.admin_export import AdminExportMixin
 from .models import Employee, Department, Designation, DeviceToken
@@ -76,7 +79,8 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
     ordering = ['-created_at']
     readonly_fields = ['id', 'created_at', 'updated_at', 'profile_picture_preview']
     form = EmployeeAdminForm
-    
+    actions = ['assign_leave_for_today']
+
     fieldsets = (
         ('Profile', {
             'fields': ('profile_picture_preview', 'profile_picture'),
@@ -136,3 +140,33 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
             if raw:
                 obj.set_password(raw)
         super().save_model(request, obj, form, change)
+
+    @admin.action(description='Assign leave for today')
+    def assign_leave_for_today(self, request, queryset):
+        from attendance.models import LeaveAssignment
+        from attendance.leave_utils import materialize_leave_attendance, validate_leave_no_duty_sessions
+
+        today = timezone.localdate()
+        ok = 0
+        skipped = []
+        for emp in queryset:
+            try:
+                validate_leave_no_duty_sessions(emp, today, today)
+            except ValidationError as exc:
+                skipped.append(f'{emp.employee_id}: {exc.messages[0]}')
+                continue
+            LeaveAssignment.objects.update_or_create(
+                employee=emp,
+                start_date=today,
+                end_date=today,
+                defaults={'reason': '', 'created_by': request.user},
+            )
+            materialize_leave_attendance(emp, today, today, '')
+            ok += 1
+        self.message_user(request, f'Leave assigned for today to {ok} employee(s).', messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                'Skipped (duty session exists or validation failed): ' + ' | '.join(skipped[:15]),
+                messages.WARNING,
+            )

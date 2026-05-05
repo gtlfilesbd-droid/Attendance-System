@@ -1,8 +1,15 @@
+from django import forms
 from django.contrib import admin
 from django.utils import timezone
 from config.admin_export import AdminExportMixin
 from employees.department_permissions import get_permitted_departments
-from .models import Attendance, DutySession
+from .models import Attendance, DutySession, LeaveAssignment
+from .leave_utils import (
+    materialize_leave_attendance,
+    remove_leave_attendance_safe,
+    remove_leave_dates_removed_from_range,
+    validate_leave_no_duty_sessions,
+)
 from .admin_filters import (
     format_time_12h,
     format_total_hours_hhmmss,
@@ -182,3 +189,84 @@ class DutySessionAdmin(AdminExportMixin, admin.ModelAdmin):
             return r[:60] + '...' if len(r) > 60 else r
         return '—'
     get_end_session_remark.short_description = 'End Session Remark'
+
+
+class LeaveAssignmentForm(forms.ModelForm):
+    class Meta:
+        model = LeaveAssignment
+        fields = ('employee', 'start_date', 'end_date', 'reason')
+
+    def clean(self):
+        cleaned = super().clean()
+        emp = cleaned.get('employee')
+        sd = cleaned.get('start_date')
+        ed = cleaned.get('end_date')
+        if emp and sd and ed:
+            if sd > ed:
+                raise forms.ValidationError('Start date must be on or before end date.')
+            validate_leave_no_duty_sessions(emp, sd, ed)
+        return cleaned
+
+
+@admin.register(LeaveAssignment)
+class LeaveAssignmentAdmin(AdminExportMixin, admin.ModelAdmin):
+    form = LeaveAssignmentForm
+    change_list_template = 'admin/change_list_export.html'
+    list_display = [
+        'id', 'employee', 'start_date', 'end_date', 'reason',
+        'created_by', 'created_at',
+    ]
+    list_filter = ['start_date', 'end_date', 'employee']
+    search_fields = ['employee__employee_id', 'employee__name', 'employee__email', 'reason']
+    ordering = ['-start_date', '-created_at']
+    readonly_fields = ['created_at', 'updated_at']
+    autocomplete_fields = ['employee']
+
+    fieldsets = (
+        (None, {
+            'fields': ('employee', 'start_date', 'end_date', 'reason'),
+            'description': (
+                'Saves one Attendance row per day with status Leave for the selected range. '
+                'Cannot overlap days where the employee already has a duty session.'
+            ),
+        }),
+    )
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request).select_related('employee', 'created_by')
+        if request.user.is_superuser:
+            return qs
+        permitted = get_permitted_departments(request.user)
+        return qs.filter(employee__department__in=permitted)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == 'employee' and not request.user.is_superuser:
+            from employees.models import Employee
+            permitted = get_permitted_departments(request.user)
+            kwargs['queryset'] = Employee.objects.filter(department__in=permitted)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        prev = None
+        if change:
+            prev = LeaveAssignment.objects.filter(pk=obj.pk).first()
+        if not change:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+        materialize_leave_attendance(obj.employee, obj.start_date, obj.end_date, obj.reason)
+        if prev:
+            if prev.employee_id != obj.employee_id:
+                remove_leave_attendance_safe(prev.employee, prev.start_date, prev.end_date)
+            else:
+                remove_leave_dates_removed_from_range(
+                    prev.employee, prev.start_date, prev.end_date, obj.start_date, obj.end_date
+                )
+
+    def delete_model(self, request, obj):
+        remove_leave_attendance_safe(obj.employee, obj.start_date, obj.end_date)
+        obj.delete()
+
+    def delete_queryset(self, request, queryset):
+        for o in queryset:
+            remove_leave_attendance_safe(o.employee, o.start_date, o.end_date)
+        queryset.delete()

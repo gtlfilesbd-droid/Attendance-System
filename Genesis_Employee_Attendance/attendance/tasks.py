@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.db.models import Q, Sum
 from datetime import timedelta, time, datetime
 from .models import DutySession, Attendance
+from .leave_utils import leave_assignment_covers_date
 from .utils import calculate_duration_seconds
 from employees.models import Employee
 
@@ -24,6 +25,8 @@ def mark_absent_employees():
     active_employees = Employee.objects.filter(is_active=True)
 
     for employee in active_employees:
+        if leave_assignment_covers_date(employee, yesterday):
+            continue
         attendance = Attendance.objects.filter(
             employee=employee,
             date=yesterday

@@ -211,7 +211,9 @@ class AttendanceReportSerializer(serializers.ModelSerializer):
         return _seconds_to_hhmmss(total_seconds) if total_seconds else None
 
     def get_duty_status(self, obj):
-        """Return on_duty, off_duty, or absent (matches dashboard logic from DutySession)."""
+        """Return on_duty, off_duty, leave, or absent (matches dashboard logic from DutySession)."""
+        if obj.status == 'LEAVE':
+            return 'leave'
         has_open = DutySession.objects.filter(
             employee=obj.employee, date=obj.date, end_time__isnull=True
         ).exists()
@@ -235,6 +237,7 @@ class DailyAttendanceSummarySerializer(serializers.Serializer):
     late_count = serializers.IntegerField(read_only=True)
     half_day_count = serializers.IntegerField(read_only=True)
     absent_count = serializers.IntegerField(read_only=True)
+    leave_count = serializers.IntegerField(read_only=True)
     present_percentage = serializers.FloatField(read_only=True)
     average_hours_worked = serializers.FloatField(read_only=True)
     total_hours_worked = serializers.FloatField(read_only=True)
@@ -260,9 +263,11 @@ class DailyAttendanceSummarySerializer(serializers.Serializer):
         late_count = attendances.filter(status='LATE').count()
         half_day_count = attendances.filter(status='HALF_DAY').count()
         absent_count = attendances.filter(status='ABSENT').count()
-        
-        # Calculate percentages
-        present_percentage = (present_count / total_employees * 100) if total_employees > 0 else 0
+        leave_count = attendances.filter(status='LEAVE').count()
+
+        # Present % excludes employees on leave from denominator (plan)
+        denom = max(1, total_employees - leave_count)
+        present_percentage = (present_count / denom * 100) if total_employees > 0 else 0
         
         # Calculate hours
         total_hours = attendances.aggregate(
@@ -288,6 +293,7 @@ class DailyAttendanceSummarySerializer(serializers.Serializer):
             'late_count': late_count,
             'half_day_count': half_day_count,
             'absent_count': absent_count,
+            'leave_count': leave_count,
             'present_percentage': round(present_percentage, 2),
             'average_hours_worked': round(float(average_hours), 2),
             'total_hours_worked': round(float(total_hours), 2),

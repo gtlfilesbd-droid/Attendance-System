@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('attendance', '0004_increase_total_hours_precision'),
-        ('employees', '0001_initial'),
+        ('employees', '0007_add_user_department_permission'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

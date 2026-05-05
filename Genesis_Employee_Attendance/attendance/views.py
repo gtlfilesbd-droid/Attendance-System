@@ -353,6 +353,7 @@ def my_attendance(request):
         'late_count': att_queryset.filter(status='LATE').count(),
         'half_day_count': att_queryset.filter(status='HALF_DAY').count(),
         'absent_count': att_queryset.filter(status='ABSENT').count(),
+        'leave_count': att_queryset.filter(status='LEAVE').count(),
         'total_hours': float(total_hours_overall),
         'average_hours': float(total_hours_overall / len(by_date)) if by_date else 0.0,
     }
@@ -485,7 +486,9 @@ def all_attendance(request):
                     date__gte=start_date, date__lte=end_date
                 ).values_list('employee_id', 'date')
             )
-            existing = existing_att | on_or_off_duty
+            from attendance.leave_utils import existing_pairs_from_leave_assignments
+            leave_pairs = existing_pairs_from_leave_assignments(in_scope_ids, start_date, end_date)
+            existing = existing_att | on_or_off_duty | leave_pairs
             
             # Apply same filters to existing for consistency
             if department:
@@ -716,6 +719,7 @@ def attendance_report(request):
             'late_count': queryset.filter(status='LATE').count(),
             'half_day_count': queryset.filter(status='HALF_DAY').count(),
             'absent_count': queryset.filter(status='ABSENT').count(),
+            'leave_count': queryset.filter(status='LEAVE').count(),
             'total_hours_worked': float(queryset.aggregate(Sum('total_hours'))['total_hours__sum'] or 0),
             'average_hours_per_day': float(queryset.aggregate(Avg('total_hours'))['total_hours__avg'] or 0),
         }

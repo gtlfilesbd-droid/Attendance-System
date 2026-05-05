@@ -48,6 +48,18 @@ def calculate_daily_attendance():
     
     for employee in active_employees:
         try:
+            # Do not overwrite admin leave for today
+            leave_row = Attendance.objects.filter(
+                employee=employee, date=today, status='LEAVE'
+            ).exists()
+            if leave_row:
+                skipped += 1
+                continue
+            from attendance.leave_utils import leave_assignment_covers_date
+            if leave_assignment_covers_date(employee, today):
+                skipped += 1
+                continue
+
             # Get all location logs for today
             locations = LocationLog.objects.filter(
                 employee=employee,
