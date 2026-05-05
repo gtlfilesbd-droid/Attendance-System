@@ -401,6 +401,9 @@ def all_attendance(request):
     employee_ids = request.query_params.getlist('employee_id')
     include_sessions = request.query_params.get('include_sessions') == '1'
     include_absent = request.query_params.get('include_absent') == '1'
+    report_bucket = (request.query_params.get('report_bucket') or 'all').strip().lower()
+    if report_bucket not in ('all', 'present', 'leave', 'absent'):
+        report_bucket = 'all'
     
     # Build base query
     queryset = Attendance.objects.all().select_related('employee')
@@ -437,6 +440,20 @@ def all_attendance(request):
     # Filter by status
     if status_filter:
         queryset = queryset.filter(status=status_filter)
+
+    # Bucket filters (used by reports page)
+    # - present: PRESENT/LATE/HALF_DAY only
+    # - leave: LEAVE only (plus synthetic leave from LeaveAssignment below)
+    # - absent: ABSENT only (plus synthetic absent below)
+    if report_bucket == 'present':
+        queryset = queryset.filter(status__in=['PRESENT', 'LATE', 'HALF_DAY'])
+        include_absent = False
+    elif report_bucket == 'leave':
+        queryset = queryset.filter(status='LEAVE')
+        include_absent = False
+    elif report_bucket == 'absent':
+        queryset = queryset.filter(status='ABSENT')
+        include_absent = True
     
     # Filter by employee (supports multiple)
     if employee_ids:
@@ -445,8 +462,9 @@ def all_attendance(request):
     # Order by date descending, then employee name
     queryset = queryset.order_by('-date', 'employee__name')
     
-    # Build synthetic absent records when requested
+    # Build synthetic absent/leave records when requested
     synthetic_absent = []
+    synthetic_leave = []
     if include_absent:
         # Resolve date range
         if date_str:
@@ -536,6 +554,80 @@ def all_attendance(request):
                             'updated_at': None,
                         })
                 current += timedelta(days=1)
+
+    # Synthetic leave rows for LeaveAssignment-covered days without an Attendance row.
+    # Required for "Only Leave Report" so leave shows even if attendance wasn't materialized.
+    if report_bucket == 'leave':
+        # Resolve date range
+        if date_str:
+            try:
+                filter_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                start_date = end_date = filter_date
+            except ValueError:
+                start_date = end_date = None
+        elif start_date_str and end_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d').date()
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                start_date = end_date = None
+        else:
+            since = timezone.now().date() - timedelta(days=7)
+            start_date = since
+            end_date = timezone.now().date()
+
+        if start_date is not None and end_date is not None:
+            emp_qs = Employee.objects.filter(is_active=True)
+            if department:
+                emp_qs = emp_qs.filter(department__name=department)
+            if employee_ids:
+                emp_qs = emp_qs.filter(id__in=employee_ids)
+            in_scope_ids = set(emp_qs.values_list('id', flat=True))
+
+            existing_att = set(
+                Attendance.objects.filter(
+                    date__gte=start_date, date__lte=end_date
+                ).values_list('employee_id', 'date')
+            )
+            emp_cache = {e.id: e for e in Employee.objects.filter(id__in=in_scope_ids).select_related()}
+            emp_serializer = EmployeeProfileSerializer(context={'request': request})
+
+            from attendance.leave_utils import existing_pairs_from_leave_assignments
+            leave_pairs = existing_pairs_from_leave_assignments(in_scope_ids, start_date, end_date)
+
+            for emp_id, d in sorted(leave_pairs, key=lambda t: (t[1], str(t[0]))):
+                if (emp_id, d) in existing_att:
+                    continue
+                emp = emp_cache.get(emp_id)
+                if not emp:
+                    continue
+                synthetic_leave.append({
+                    'id': None,
+                    'employee': str(emp.id),
+                    'employee_details': emp_serializer.to_representation(emp),
+                    'employee_name': emp.name,
+                    'employee_id': emp.employee_id or '',
+                    'date': d.isoformat(),
+                    'status': 'LEAVE',
+                    'first_location_time': None,
+                    'last_location_time': None,
+                    'check_in_time': None,
+                    'check_out_time': None,
+                    'total_hours': 0,
+                    'duration_hours': '0h 0m',
+                    'total_locations_logged': 0,
+                    'location_tracking_quality': 'No tracking',
+                    'is_complete': False,
+                    'is_overtime': False,
+                    'sessions': [],
+                    'check_in_time_str': None,
+                    'check_out_time_str': None,
+                    'total_hours_str': None,
+                    'duty_status': 'leave',
+                    'remarks': 'Leave',
+                    'created_at': None,
+                    'updated_at': None,
+                })
     
     # Serialize real records
     serializer = AttendanceReportSerializer(
@@ -544,8 +636,9 @@ def all_attendance(request):
     )
     all_data = list(serializer.data)
     
-    # Add synthetic absent and sort by date desc, employee name
+    # Add synthetic absent/leave and sort by date desc, employee name
     all_data.extend(synthetic_absent)
+    all_data.extend(synthetic_leave)
     all_data.sort(key=lambda r: (-(datetime.strptime(r['date'], '%Y-%m-%d').date() if r.get('date') else timezone.now().date()).toordinal(), (r.get('employee_name') or '').lower()))
     
     # Paginate combined list if needed

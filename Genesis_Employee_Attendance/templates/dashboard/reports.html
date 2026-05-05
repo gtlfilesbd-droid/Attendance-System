@@ -81,6 +81,9 @@
             <select class="form-select" id="reportTypeSelect">
                 <option value="session" selected>Attendance Session</option>
                 <option value="summary">Attendance Summary</option>
+                <option value="present">Only Present Report</option>
+                <option value="leave">Only Leave Report</option>
+                <option value="absent">Only Absent Report</option>
             </select>
         </div>
         <div class="col-6 col-sm-4 col-md-2">
@@ -278,7 +281,8 @@
     let distributionChart;
     let reportData = [];
     let currentPage = 1;
-    let reportType = 'session';  // 'session' or 'summary'
+    let reportType = 'session';  // layout: 'session' or 'summary'
+    let reportBucket = 'all';    // API bucket: all|present|leave|absent
     let hasReportBeenGenerated = false;
     const itemsPerPage = 20;
     
@@ -643,9 +647,11 @@
             return;
         }
         
-        // Use the all-attendance endpoint with filters; include_sessions=1 for both (Summary needs locations)
-        // include_absent=1 ensures absent employees (no DutySession) appear in the report and are counted
-        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}&include_sessions=1&include_absent=1&page_size=500`;
+        // Use the all-attendance endpoint with filters
+        // include_sessions=1 for both (Summary needs locations)
+        // include_absent=1 only when requesting all/absent so synthetic absent rows appear
+        const includeAbsent = (reportBucket === 'absent' || reportBucket === 'all') ? 1 : 0;
+        let url = `/api/attendance/all/?start_date=${startDate}&end_date=${endDate}&include_sessions=1&include_absent=${includeAbsent}&report_bucket=${encodeURIComponent(reportBucket)}&page_size=500`;
         if (department) url += `&department=${department}`;
         if (selectedEmployeeIds.length > 0) {
             selectedEmployeeIds.forEach(id => { url += `&employee_id=${encodeURIComponent(id)}`; });
@@ -1153,7 +1159,15 @@
     // Sync reportType from selector
     function syncReportType() {
         const sel = document.getElementById('reportTypeSelect');
-        if (sel) reportType = sel.value;
+        if (!sel) return;
+        const v = sel.value;
+        if (v === 'present' || v === 'leave' || v === 'absent') {
+            reportBucket = v;
+            reportType = 'summary';
+        } else {
+            reportBucket = 'all';
+            reportType = v;
+        }
     }
 
     // Initialize on page load
