@@ -1,0 +1,61 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <div id="content-main">
+    <h1>{{ title }}</h1>
+
+    <form method="get" style="margin: 12px 0 16px 0;">
+      <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+        <div>
+          <label for="id_date_gte"><strong>Start date</strong></label><br>
+          <input id="id_date_gte" type="date" name="date__gte" value="{{ start_date|date:'Y-m-d' }}">
+        </div>
+        <div>
+          <label for="id_date_lt"><strong>End date</strong> (exclusive)</label><br>
+          {# Admin convention: date__lt is exclusive; set default to end_date+1 #}
+          <input id="id_date_lt" type="date" name="date__lt" value="{{ end_date|add:'1 day'|date:'Y-m-d' }}">
+        </div>
+        <div>
+          <button class="button" type="submit">Compute</button>
+          <a class="button" href="{{ changelist_url }}">Back to Attendance</a>
+        </div>
+      </div>
+      <p class="help" style="margin-top:10px;">
+        Computed absent does <strong>not</strong> create Attendance rows. Range is capped and future dates are ignored.
+      </p>
+    </form>
+
+    <div class="module">
+      <div style="padding:10px 12px;">
+        <strong>Total:</strong> {{ total }}
+        {% if start_date and end_date %}
+          <span style="margin-left:10px;"><strong>Window:</strong> {{ start_date }} → {{ end_date }}</span>
+        {% endif %}
+      </div>
+      <table id="result_list" class="adminlist">
+        <thead>
+          <tr>
+            <th>Employee</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+            <tr>
+              <td>
+                {{ r.employee.employee_id }} - {{ r.employee.name }}
+              </td>
+              <td>{{ r.date }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="2" style="padding:12px;">No computed absent rows for this window.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{% endblock %}
+

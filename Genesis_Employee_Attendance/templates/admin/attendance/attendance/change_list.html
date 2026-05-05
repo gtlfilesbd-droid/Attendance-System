@@ -4,3 +4,10 @@
 {% block search %}
 {{ block.super }}
 {% endblock %}
+
+{% block object-tools-items %}
+  <li>
+    <a href="computed-absent/" class="addlink">Computed Absent (safe)</a>
+  </li>
+  {{ block.super }}
+{% endblock %}

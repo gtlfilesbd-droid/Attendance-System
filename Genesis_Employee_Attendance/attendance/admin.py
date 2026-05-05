@@ -1,6 +1,11 @@
 from django import forms
 from django.contrib import admin
+from django.contrib import messages
+from django.http import HttpResponseRedirect
+from django.urls import path
 from django.utils import timezone
+from datetime import datetime, timedelta
+from django.db.models import Exists, OuterRef
 from config.admin_export import AdminExportMixin
 from employees.department_permissions import get_permitted_departments
 from .models import Attendance, DutySession, LeaveAssignment
@@ -56,12 +61,154 @@ class AttendanceAdmin(AdminExportMixin, admin.ModelAdmin):
 
     actions = ['calculate_hours']
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                'computed-absent/',
+                self.admin_site.admin_view(self.computed_absent_view),
+                name='attendance_attendance_computed_absent',
+            ),
+        ]
+        return custom + urls
+
+    def _parse_date_window(self, request):
+        """
+        Admin date filter uses [date__gte, date__lt). Return (start_date, end_date_inclusive)
+        or (None, None) if missing/invalid.
+        """
+        gte = request.GET.get('date__gte')
+        lt = request.GET.get('date__lt')
+        if not (gte and lt):
+            return None, None
+        try:
+            start_date = datetime.strptime(gte, '%Y-%m-%d').date()
+            end_date = datetime.strptime(lt, '%Y-%m-%d').date() - timedelta(days=1)
+            return start_date, end_date
+        except Exception:
+            return None, None
+
+    def computed_absent_view(self, request):
+        """
+        Compute absent employees for a date window WITHOUT writing Attendance rows.
+        Rules match dashboard/reports: absent if no duty session and no attendance row
+        (and not on leave). Past-only, capped.
+        """
+        from employees.models import Employee
+        from attendance.leave_utils import existing_pairs_from_leave_assignments
+
+        start_date, end_date = self._parse_date_window(request)
+        if start_date is None or end_date is None:
+            today = timezone.localdate()
+            start_date, end_date = today, today
+
+        # Past-only (no future computation)
+        today = timezone.localdate()
+        if end_date > today:
+            end_date = today
+
+        # Hard cap to avoid heavy admin pages
+        max_days = 7
+        if (end_date - start_date).days > (max_days - 1):
+            end_date = start_date + timedelta(days=max_days - 1)
+            messages.warning(request, f'Date range capped to {max_days} day(s) for safety.')
+
+        permitted = get_permitted_departments(request.user)
+        emp_qs = Employee.objects.filter(is_active=True)
+        if not request.user.is_superuser:
+            emp_qs = emp_qs.filter(department__in=permitted)
+        employees = list(emp_qs.only('id', 'employee_id', 'name', 'department_id'))
+        emp_ids = [e.id for e in employees]
+
+        if not emp_ids:
+            context = dict(
+                self.admin_site.each_context(request),
+                title='Computed Absent',
+                start_date=start_date,
+                end_date=end_date,
+                rows=[],
+                total=0,
+            )
+            from django.template.response import TemplateResponse
+            return TemplateResponse(request, 'admin/attendance/attendance/computed_absent.html', context)
+
+        existing_att_pairs = set(
+            Attendance.objects.filter(
+                employee_id__in=emp_ids,
+                date__gte=start_date,
+                date__lte=end_date,
+            ).values_list('employee_id', 'date')
+        )
+        duty_pairs = set(
+            DutySession.objects.filter(
+                employee_id__in=emp_ids,
+                date__gte=start_date,
+                date__lte=end_date,
+            ).values_list('employee_id', 'date')
+        )
+        leave_pairs = existing_pairs_from_leave_assignments(set(emp_ids), start_date, end_date)
+        leave_att_pairs = set(
+            Attendance.objects.filter(
+                employee_id__in=emp_ids,
+                date__gte=start_date,
+                date__lte=end_date,
+                status='LEAVE',
+            ).values_list('employee_id', 'date')
+        )
+        blocked = existing_att_pairs | duty_pairs | leave_pairs | leave_att_pairs
+
+        emp_by_id = {e.id: e for e in employees}
+        rows = []
+        cur = start_date
+        while cur <= end_date:
+            for emp_id in emp_ids:
+                if (emp_id, cur) in blocked:
+                    continue
+                e = emp_by_id.get(emp_id)
+                if not e:
+                    continue
+                rows.append({'employee': e, 'date': cur})
+            cur += timedelta(days=1)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title='Computed Absent',
+            start_date=start_date,
+            end_date=end_date,
+            rows=rows,
+            total=len(rows),
+            changelist_url='../',
+        )
+        from django.template.response import TemplateResponse
+        return TemplateResponse(request, 'admin/attendance/attendance/computed_absent.html', context)
+
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('employee')
         if request.user.is_superuser:
-            return qs
-        permitted = get_permitted_departments(request.user)
-        return qs.filter(employee__department__in=permitted)
+            base_qs = qs
+        else:
+            permitted = get_permitted_departments(request.user)
+            base_qs = qs.filter(employee__department__in=permitted)
+
+        # Safety net: when viewing ABSENT rows for a specific date window,
+        # exclude entries that now have duty session activity for that day.
+        if request.GET.get('status__exact') == 'ABSENT':
+            gte = request.GET.get('date__gte')
+            lt = request.GET.get('date__lt')
+            if gte and lt:
+                try:
+                    start_date = datetime.strptime(gte, '%Y-%m-%d').date()
+                    end_date = datetime.strptime(lt, '%Y-%m-%d').date() - timedelta(days=1)
+                    duty_exists = DutySession.objects.filter(
+                        employee_id=OuterRef('employee_id'),
+                        date=OuterRef('date'),
+                    )
+                    base_qs = base_qs.filter(date__gte=start_date, date__lte=end_date).annotate(
+                        _has_duty=Exists(duty_exists)
+                    ).exclude(_has_duty=True)
+                except Exception:
+                    pass
+        return base_qs
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
         if db_field.name == 'employee' and not request.user.is_superuser:

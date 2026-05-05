@@ -132,6 +132,27 @@ def start_duty(request):
         end_time=None,
         total_hours=Decimal('0.00'),
     )
+
+    # If Admin previously materialized an ABSENT row for today, starting duty should
+    # immediately correct it so admin/dashboard/reports stay consistent.
+    try:
+        leave_row_exists = Attendance.objects.filter(employee=employee, date=today, status='LEAVE').exists()
+        if not leave_row_exists:
+            from attendance.leave_utils import leave_assignment_covers_date
+
+            if not leave_assignment_covers_date(employee, today):
+                att = Attendance.objects.filter(employee=employee, date=today).first()
+                if att and att.status == 'ABSENT':
+                    t = timezone.localtime(now).time()
+                    att.status = 'PRESENT'
+                    att.remarks = 'Started duty (auto-corrected from absent)'
+                    att.first_location_time = att.first_location_time or t
+                    att.check_in_time = att.check_in_time or t
+                    att.save(update_fields=['status', 'remarks', 'first_location_time', 'check_in_time', 'updated_at'])
+    except Exception:
+        # Never break start duty due to reconciliation issues
+        pass
+
     return Response({
         'success': True,
         'data': {
