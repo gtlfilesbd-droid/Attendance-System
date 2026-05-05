@@ -25,6 +25,9 @@
                 {% elif filter_type == 'absent' %}
                 <th>Designation</th>
                 <th>Email</th>
+                {% elif filter_type == 'leave' %}
+                <th>Designation</th>
+                <th>Email</th>
                 {% endif %}
             </tr>
         </thead>
@@ -51,6 +54,9 @@
                 <td>{{ emp.speed }}</td>
                 <td><strong>{{ emp.total_duty_hours }}</strong></td>
                 {% elif filter_type == 'absent' %}
+                <td>{{ emp.designation }}</td>
+                <td>{{ emp.email }}</td>
+                {% elif filter_type == 'leave' %}
                 <td>{{ emp.designation }}</td>
                 <td>{{ emp.email }}</td>
                 {% endif %}

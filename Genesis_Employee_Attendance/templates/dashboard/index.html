@@ -54,6 +54,16 @@
     </div>
     
     <div class="col-md-3 col-sm-6">
+        <div class="stat-card clickable-card" data-filter="leave" role="button" tabindex="0" style="border-left: 4px solid #7c3aed;">
+            <div class="icon" style="background: rgba(139, 92, 246, 0.12); color: #7c3aed;">
+                <i class="fas fa-umbrella-beach"></i>
+            </div>
+            <div class="value">{{ stats.leave_count }}</div>
+            <div class="label">Leave</div>
+        </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
         <div class="stat-card danger clickable-card" data-filter="absent" role="button" tabindex="0">
             <div class="icon">
                 <i class="fas fa-times-circle"></i>
@@ -130,6 +140,10 @@
                     <div class="value" style="font-size: 1.75rem; color: var(--danger);">{{ stats.absent_count }}</div>
                     <small class="text-muted d-block">Absent</small>
                 </div>
+                <div class="col-4 mt-3">
+                    <div class="value" style="font-size: 1.75rem; color: #7c3aed;">{{ stats.leave_count }}</div>
+                    <small class="text-muted d-block">Leave</small>
+                </div>
             </div>
         </div>
     </div>
@@ -193,6 +207,8 @@
                                     <span class="badge bg-info">Half Day</span>
                                 {% elif item.att.status == 'ABSENT' %}
                                     <span class="badge bg-danger">Absent</span>
+                                {% elif item.att.status == 'LEAVE' %}
+                                    <span class="badge" style="background:#7c3aed;">Leave</span>
                                 {% else %}
                                     <span class="badge bg-secondary">{{ item.att.status }}</span>
                                 {% endif %}
@@ -275,6 +291,13 @@
                 tension: 0.4,
                 fill: true
             }, {
+                label: 'Leave',
+                data: {{ trend_leave|safe }},
+                borderColor: '#7c3aed',
+                backgroundColor: 'rgba(139, 92, 246, 0.12)',
+                tension: 0.4,
+                fill: true
+            }, {
                 label: 'Absent',
                 data: {{ trend_absent|safe }},
                 borderColor: '#ef4444',
@@ -308,16 +331,18 @@
     const distributionChart = new Chart(distributionCtx, {
         type: 'doughnut',
         data: {
-            labels: ['On Duty', 'Off Duty', 'Absent'],
+            labels: ['On Duty', 'Off Duty', 'Leave', 'Absent'],
             datasets: [{
                 data: [
                     {{ stats.on_duty_count }},
                     {{ stats.off_duty_count }},
+                    {{ stats.leave_count }},
                     {{ stats.absent_count }}
                 ],
                 backgroundColor: [
                     '#10b981',
                     '#f59e0b',
+                    '#7c3aed',
                     '#ef4444'
                 ],
                 borderWidth: 2,
@@ -353,6 +378,7 @@
         total: 'Total Active Employees',
         on_duty: 'On Duty',
         off_duty: 'Off Duty',
+        leave: 'Leave',
         absent: 'Absent'
     };
 

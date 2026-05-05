@@ -1073,7 +1073,9 @@ def dashboard_home(request):
         sess_filter['employee__department__in'] = permitted
 
     # Total active employees (within permitted departments)
-    total_employees = Employee.objects.filter(**emp_filter).count()
+    emp_base_qs = Employee.objects.filter(**emp_filter)
+    total_employees = emp_base_qs.count()
+    all_active_ids = set(emp_base_qs.values_list('id', flat=True))
 
     # On Duty: employees with open session (end_time is NULL) for selected date
     on_duty_qs = DutySession.objects.filter(
@@ -1090,20 +1092,39 @@ def dashboard_home(request):
     off_duty_ids = employees_with_closed - on_duty_ids
     off_duty_count = len(off_duty_ids)
 
-    # Absent: total_active - on_duty - off_duty
-    absent_count = max(total_employees - on_duty_count - off_duty_count, 0)
+    # Leave: from Attendance row OR LeaveAssignment covering the date.
+    # We support both so Dashboard stays correct even if a LeaveAssignment exists but the
+    # per-day Attendance row hasn't been materialized yet.
+    leave_att_qs = Attendance.objects.filter(date=selected_date, status='LEAVE')
+    if sess_filter:
+        leave_att_qs = leave_att_qs.filter(employee__department__in=permitted)
+    leave_ids = set(leave_att_qs.values_list('employee_id', flat=True).distinct())
+    from attendance.models import LeaveAssignment
+    leave_asg_qs = LeaveAssignment.objects.filter(
+        start_date__lte=selected_date,
+        end_date__gte=selected_date,
+    )
+    if sess_filter:
+        leave_asg_qs = leave_asg_qs.filter(employee__department__in=permitted)
+    leave_ids |= set(leave_asg_qs.values_list('employee_id', flat=True).distinct())
+    leave_ids &= all_active_ids
+    leave_count = len(leave_ids)
+
+    # Absent: total_active - on_duty - off_duty - leave
+    absent_ids = (all_active_ids - on_duty_ids - off_duty_ids - leave_ids)
+    absent_count = len(absent_ids)
 
     # Attendance percentage (on_duty + off_duty vs total)
     attended = on_duty_count + off_duty_count
-    attendance_percentage = (
-        (attended / total_employees * 100) if total_employees > 0 else 0
-    )
+    denom = max(1, total_employees - leave_count)
+    attendance_percentage = ((attended / denom * 100) if total_employees > 0 else 0)
 
     # Last 7 days trend (ending on selected_date)
     trend_dates = [selected_date - timedelta(days=i) for i in range(6, -1, -1)]
     trend_on_duty = []
     trend_off_duty = []
     trend_absent = []
+    trend_leave = []
     for d in trend_dates:
         on_qs = DutySession.objects.filter(date=d, end_time__isnull=True, **sess_filter)
         on_ids = set(on_qs.values_list('employee_id', flat=True).distinct())
@@ -1112,7 +1133,17 @@ def dashboard_home(request):
         off_ids = closed_ids - on_ids
         trend_on_duty.append(len(on_ids))
         trend_off_duty.append(len(off_ids))
-        trend_absent.append(max(total_employees - len(on_ids) - len(off_ids), 0))
+        leave_att = Attendance.objects.filter(date=d, status='LEAVE')
+        if sess_filter:
+            leave_att = leave_att.filter(employee__department__in=permitted)
+        leave_ids_d = set(leave_att.values_list('employee_id', flat=True).distinct())
+        leave_asg = LeaveAssignment.objects.filter(start_date__lte=d, end_date__gte=d)
+        if sess_filter:
+            leave_asg = leave_asg.filter(employee__department__in=permitted)
+        leave_ids_d |= set(leave_asg.values_list('employee_id', flat=True).distinct())
+        leave_ids_d &= all_active_ids
+        trend_leave.append(len(leave_ids_d))
+        trend_absent.append(max(total_employees - len(on_ids) - len(off_ids) - len(leave_ids_d), 0))
 
     # Recent activities: selected date's Attendance records, enriched with start/end locations
     att_qs = Attendance.objects.filter(date=selected_date).select_related('employee')
@@ -1149,6 +1180,7 @@ def dashboard_home(request):
             'total_employees': total_employees,
             'on_duty_count': on_duty_count,
             'off_duty_count': off_duty_count,
+            'leave_count': leave_count,
             'absent_count': absent_count,
             'attendance_percentage': round(attendance_percentage, 1),
             'selected_date': selected_date,
@@ -1156,6 +1188,7 @@ def dashboard_home(request):
         'trend_labels': json.dumps([d.strftime('%a %m/%d') for d in trend_dates]),
         'trend_on_duty': json.dumps(trend_on_duty),
         'trend_off_duty': json.dumps(trend_off_duty),
+        'trend_leave': json.dumps(trend_leave),
         'trend_absent': json.dumps(trend_absent),
         'recent_activities_enriched': recent_activities_enriched,
     }
@@ -1282,7 +1315,31 @@ def dashboard_employee_list(request):
             ).values_list('employee_id', flat=True).distinct()
         ) - on_duty_ids
         attended_ids = on_duty_ids | off_duty_ids
-        for emp in emp_base.exclude(id__in=attended_ids).select_related('department', 'designation').order_by('name'):
+        # Exclude leave (Attendance LEAVE or LeaveAssignment covering date)
+        from attendance.models import Attendance as _Att, LeaveAssignment as _LA
+        leave_ids = set(
+            _Att.objects.filter(date=selected_date, status='LEAVE').values_list('employee_id', flat=True).distinct()
+        )
+        leave_ids |= set(
+            _LA.objects.filter(start_date__lte=selected_date, end_date__gte=selected_date).values_list('employee_id', flat=True).distinct()
+        )
+        for emp in emp_base.exclude(id__in=attended_ids | leave_ids).select_related('department', 'designation').order_by('name'):
+            employees.append({
+                'name': emp.name,
+                'employee_id': emp.employee_id,
+                'department': emp.department.name if emp.department else '—',
+                'designation': emp.designation.name if emp.designation else '—',
+                'email': emp.email,
+            })
+    elif filter_type == 'leave':
+        from attendance.models import Attendance as _Att, LeaveAssignment as _LA
+        leave_ids = set(
+            _Att.objects.filter(date=selected_date, status='LEAVE').values_list('employee_id', flat=True).distinct()
+        )
+        leave_ids |= set(
+            _LA.objects.filter(start_date__lte=selected_date, end_date__gte=selected_date).values_list('employee_id', flat=True).distinct()
+        )
+        for emp in emp_base.filter(id__in=leave_ids).select_related('department', 'designation').order_by('name'):
             employees.append({
                 'name': emp.name,
                 'employee_id': emp.employee_id,
