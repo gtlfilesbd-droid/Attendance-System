@@ -19,7 +19,8 @@ def mark_absent_employees():
     Mark employees as absent if they haven't checked in by end of day.
     Uses Attendance model (no LeaveRequest or AttendanceAlert in this schema).
     """
-    today = timezone.now().date()
+    # Use local date (TIME_ZONE) so the scheduled time (Asia/Dhaka) marks the correct day.
+    today = timezone.localdate()
     yesterday = today - timedelta(days=1)
 
     active_employees = Employee.objects.filter(is_active=True)
