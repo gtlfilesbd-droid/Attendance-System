@@ -291,6 +291,9 @@ CELERY_TIMEZONE = 'Asia/Dhaka'  # Set timezone to Asia/Dhaka
 CELERY_ENABLE_UTC = False  # Use local time
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+# Acknowledge tasks AFTER successful execution so they survive worker crashes/restarts.
+CELERY_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
 
 # Celery Beat Schedule
 from celery.schedules import crontab

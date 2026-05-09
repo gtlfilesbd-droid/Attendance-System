@@ -13,34 +13,78 @@ from .utils import calculate_duration_seconds
 from employees.models import Employee
 
 
+logger = logging.getLogger(__name__)
+
+
 @shared_task
-def mark_absent_employees():
+def mark_absent_employees(backfill_days=3):
     """
-    Mark employees as absent if they haven't checked in by end of day.
-    Uses Attendance model (no LeaveRequest or AttendanceAlert in this schema).
+    Mark employees as absent for any of the last `backfill_days` days where:
+    - No Attendance row exists for that day
+    - No LeaveAssignment covers that day
+    - No DutySession exists for that day
+
+    Backfills the last N days (default 3) so that missed scheduled runs
+    (e.g. due to Redis restart) are automatically recovered on the next run.
     """
-    # Use local date (TIME_ZONE) so the scheduled time (Asia/Dhaka) marks the correct day.
     today = timezone.localdate()
-    yesterday = today - timedelta(days=1)
+    active_employees = list(Employee.objects.filter(is_active=True))
+    total_created = 0
+    errors = 0
 
-    active_employees = Employee.objects.filter(is_active=True)
+    for days_ago in range(1, backfill_days + 1):
+        target_date = today - timedelta(days=days_ago)
 
-    for employee in active_employees:
-        if leave_assignment_covers_date(employee, yesterday):
-            continue
-        attendance = Attendance.objects.filter(
-            employee=employee,
-            date=yesterday
-        ).first()
+        # Gather covered employee IDs for this date in bulk (fast).
+        covered_ids = set(
+            Attendance.objects.filter(date=target_date)
+            .values_list('employee_id', flat=True)
+        )
+        duty_ids = set(
+            DutySession.objects.filter(date=target_date)
+            .values_list('employee_id', flat=True)
+        )
 
-        if not attendance:
-            Attendance.objects.create(
-                employee=employee,
-                date=yesterday,
-                status='ABSENT'
+        created_today = 0
+        for employee in active_employees:
+            # Already has any attendance row (present/late/leave/absent) → skip
+            if employee.id in covered_ids:
+                continue
+            # Has duty session → present, not absent
+            if employee.id in duty_ids:
+                continue
+            # On leave → skip
+            if leave_assignment_covers_date(employee, target_date):
+                continue
+            try:
+                Attendance.objects.create(
+                    employee=employee,
+                    date=target_date,
+                    status='ABSENT',
+                )
+                created_today += 1
+            except Exception:
+                logger.exception(
+                    'mark_absent: failed to create ABSENT for employee=%s date=%s',
+                    employee.employee_id, target_date,
+                )
+                errors += 1
+
+        if created_today:
+            logger.info(
+                'mark_absent: date=%s created=%d absent rows',
+                target_date, created_today,
             )
+        total_created += created_today
 
-    return f"Processed attendance for {active_employees.count()} employees"
+    logger.info(
+        'mark_absent: done. employees=%d days_checked=%d total_absent_created=%d errors=%d',
+        len(active_employees), backfill_days, total_created, errors,
+    )
+    return (
+        f"Processed {len(active_employees)} employees over {backfill_days} days, "
+        f"created {total_created} absent rows, errors={errors}"
+    )
 
 
 @shared_task
