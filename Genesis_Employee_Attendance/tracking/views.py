@@ -1361,12 +1361,12 @@ def live_tracking_view(request):
     """
     Real-time tracking page (OpenStreetMap + Leaflet)
     Template: dashboard/live_tracking.html
-    JavaScript polls live locations every 10 seconds for snappier updates during duty.
+    JavaScript polls live locations every 60 seconds (1 minute).
     """
     import json as _json
     from employees.models import Employee
 
-    poll_interval_ms = 10000
+    poll_interval_ms = 60000
     permitted = get_permitted_departments(request.user)
     departments = list(permitted.values_list('name', flat=True).order_by('name'))
     employees = list(
