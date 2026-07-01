@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../config/app_config.dart';
+import '../utils/android_sdk.dart';
 import '../utils/working_hours.dart' as wh;
 import 'auth_service.dart';
 import 'api_service.dart';
@@ -52,14 +53,16 @@ class LocationService {
       return;
     }
 
-    // 2. Request "allow all the time" (background) only after foreground is granted
-    var bgStatus = await Permission.locationAlways.status;
-    if (!bgStatus.isGranted) {
-      await Permission.locationAlways.request();
+    // 2. Request "allow all the time" (background) only on Android 10+ after foreground is granted
+    if (await AndroidSdk.isAtLeast29) {
+      var bgStatus = await Permission.locationAlways.status;
+      if (!bgStatus.isGranted) {
+        await Permission.locationAlways.request();
+      }
     }
 
     // 3. Notification permission (Android 13+) - needed for foreground service notification
-    if (await Permission.notification.isDenied) {
+    if (await AndroidSdk.isAtLeast33 && await Permission.notification.isDenied) {
       await Permission.notification.request();
     }
 
@@ -85,6 +88,9 @@ class LocationService {
 
   /// True if background location ("all the time") is granted. Caller may show a hint if false.
   Future<bool> hasBackgroundLocationPermission() async {
+    if (!await AndroidSdk.isAtLeast29) {
+      return await Permission.location.isGranted;
+    }
     return await Permission.locationAlways.isGranted;
   }
 

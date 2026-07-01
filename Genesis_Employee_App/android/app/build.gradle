@@ -51,7 +51,7 @@ android {
 
     defaultConfig {
         applicationId "com.genesis.employee_app"
-        minSdkVersion 29
+        minSdkVersion 24
         targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName

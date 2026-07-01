@@ -11,6 +11,7 @@ import 'package:geocoding/geocoding.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
+import '../utils/android_sdk.dart';
 import '../services/auth_service.dart';
 import '../services/location_service.dart';
 import '../services/api_service.dart';
@@ -643,7 +644,7 @@ class _HomeScreenState extends State<HomeScreen> {
           );
           return;
         }
-        if (await Permission.notification.isDenied) {
+        if (await AndroidSdk.isAtLeast33 && await Permission.notification.isDenied) {
           await Permission.notification.request();
         }
         if (mounted && context.mounted) {
@@ -708,7 +709,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 );
               }
               final hasBackground = await _locationService.hasBackgroundLocationPermission();
-              if (!hasBackground && mounted && context.mounted) {
+              if (!hasBackground &&
+                  await AndroidSdk.isAtLeast29 &&
+                  mounted &&
+                  context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('For full duty tracking when app is in background, allow location "All the time" in Settings.'),

@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../utils/android_sdk.dart';
 import '../config/app_config.dart';
 import 'api_service.dart';
 import 'auth_service.dart';
@@ -38,7 +39,9 @@ class PushNotificationService {
 
     // Request notification permission (Android 13+) and create channel for FCM
     if (Platform.isAndroid) {
-      await Permission.notification.request();
+      if (await AndroidSdk.isAtLeast33) {
+        await Permission.notification.request();
+      }
       const channel = AndroidNotificationChannel(
         _dutyReminderChannelId,
         'Duty Reminder',

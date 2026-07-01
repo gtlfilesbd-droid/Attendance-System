@@ -80,6 +80,17 @@ Permissions in `android/app/src/main/AndroidManifest.xml` are set for:
 
 No code changes needed for release; ensure your **Play Console** “App content” declarations (e.g. sensitive permissions) match how the app uses location and background usage.
 
+**Supported Android versions:** API 24+ (Android 7.0 Nougat through current). `targetSdkVersion` is 36. On Android 7–9, background location uses the legacy permission model (foreground location grant is sufficient); Android 10+ requires separate “All the time” location permission.
+
+**Compatibility test matrix (recommended before release):**
+
+| API level | Android version | Verify |
+|-----------|-----------------|--------|
+| 24 | 7.0 Nougat | APK install, login, Start Duty |
+| 26 | 8.0 Oreo | Foreground service notification visible |
+| 28 | 9 Pie | Tracking continues when app is backgrounded |
+| 33+ | 13+ | POST_NOTIFICATIONS runtime permission flow |
+
 ---
 
 ### 3. Generate Signed APK / App Bundle

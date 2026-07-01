@@ -48,7 +48,7 @@ For local development:
 ### 3. Android Setup
 
 #### Minimum SDK Version
-The app requires Android API level 21 (Android 5.0) or higher.
+The app requires Android API level 24 (Android 7.0 Nougat) or higher.
 
 #### Permissions
 All required permissions are already configured in `android/app/src/main/AndroidManifest.xml`:
@@ -59,7 +59,7 @@ All required permissions are already configured in `android/app/src/main/Android
 
 #### Build Configuration
 1. Open `android/app/build.gradle`
-2. Verify `minSdkVersion` is set to 21
+2. Verify `minSdkVersion` is set to 24
 3. Update `applicationId` if needed
 
 ### 4. iOS Setup

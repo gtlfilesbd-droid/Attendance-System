@@ -108,14 +108,14 @@ flutter run
 
 ## 📱 Platform Support
 
-- **Android**: Minimum SDK 21 (Android 5.0)
+- **Android**: Minimum SDK 24 (Android 7.0); target SDK 36
 - **iOS**: Minimum iOS 12.0
 
 ## 🔧 Configuration Files
 
 ### Android
 - `AndroidManifest.xml` - All permissions and service declarations
-- `build.gradle` - Build configuration with minSdk 21
+- `build.gradle` - Build configuration with minSdk 24
 - `MainActivity.kt` - Main Android activity
 
 ### iOS
