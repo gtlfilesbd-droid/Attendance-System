@@ -1,0 +1,401 @@
+{% extends 'base.html' %}
+
+{% block title %}TO-DO - Genesis Employee Attendance{% endblock %}
+
+{% block extra_css %}
+<style>
+    .todo-filters {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+    }
+    .todo-summary {
+        background: white;
+        padding: 1.25rem 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 1.5rem;
+    }
+    .todo-progress {
+        height: 6px;
+        border-radius: 3px;
+        background: #e9ecef;
+        overflow: hidden;
+        margin-top: 0.75rem;
+    }
+    .todo-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #198754, #20c997);
+        transition: width 0.3s ease;
+    }
+    .todo-card {
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.75rem;
+        transition: box-shadow 0.2s ease, transform 0.15s ease;
+    }
+    .todo-card:hover {
+        box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    .todo-card.completed {
+        background: #f8faf9;
+    }
+    .todo-card.completed .task-title,
+    .todo-card.completed .task-desc {
+        color: #6c757d;
+    }
+    .complete-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        border: 2px solid #dee2e6;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        flex-shrink: 0;
+    }
+    .complete-btn:hover {
+        border-color: #198754;
+        background: #f0fdf4;
+    }
+    .complete-btn.is-done {
+        border-color: #198754;
+        background: #198754;
+        color: white;
+    }
+    .complete-btn.is-done:hover {
+        background: #157347;
+        border-color: #157347;
+    }
+    .status-badge {
+        padding: 0.25rem 0.6rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .status-completed { background: #dcfce7; color: #166534; }
+    .status-pending { background: #f1f5f9; color: #64748b; }
+    .section-header {
+        font-size: 0.9rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6c757d;
+        margin: 1.5rem 0 0.75rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .section-header .badge {
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .view-tabs .btn.active {
+        background: var(--bs-primary);
+        color: white;
+        border-color: var(--bs-primary);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+        <h2><i class="fas fa-tasks me-2"></i>TO-DO</h2>
+        <p>Plan daily tasks and mark completion</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="{% url 'todos-report' %}" class="btn btn-outline-primary btn-sm">
+            <i class="fas fa-chart-bar me-1"></i>Report
+        </a>
+        <a href="{% url 'todos-export-csv' %}?task_date={{ selected_date|date:'Y-m-d' }}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-download me-1"></i>Export CSV
+        </a>
+        {% if user.is_superuser %}
+        <a href="{% url 'todos-permissions' %}" class="btn btn-outline-dark btn-sm">
+            <i class="fas fa-lock me-1"></i>Permissions
+        </a>
+        {% endif %}
+    </div>
+</div>
+
+{% if not has_employee_profile %}
+<div class="alert alert-info">
+    <strong>My Tasks:</strong> Your dashboard login is not linked to an Employee profile, so you cannot add your own tasks here.
+    Use the mobile app with your employee account, or ask an admin to link your Django user to your Employee record in Admin Panel.
+    {% if can_add_for_team %}
+    You can still add tasks for employees below (Team view).
+    {% endif %}
+</div>
+{% endif %}
+
+{% if request.GET.link_required %}
+<div class="alert alert-warning">
+    Link your dashboard user to an Employee profile before adding personal tasks.
+</div>
+{% endif %}
+
+{% if total_count > 0 %}
+<div class="todo-summary">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <span class="text-muted">{{ pending_count }} pending</span>
+            <span class="mx-2 text-muted">·</span>
+            <span class="text-success fw-semibold">{{ completed_count }} completed</span>
+        </div>
+        <span class="text-muted small">{{ completed_count }}/{{ total_count }} done</span>
+    </div>
+    <div class="todo-progress">
+        <div class="todo-progress-bar" style="width: {% if total_count %}{% widthratio completed_count total_count 100 %}{% else %}0{% endif %}%;"></div>
+    </div>
+</div>
+{% endif %}
+
+<div class="todo-filters">
+    <div class="view-tabs btn-group mb-3" role="group">
+        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=team{% if search %}&search={{ search|urlencode }}{% endif %}{% if department %}&department={{ department|urlencode }}{% endif %}"
+           class="btn btn-outline-primary {% if view_mode == 'team' %}active{% endif %}">
+            Team Tasks
+        </a>
+        {% if has_employee_profile %}
+        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=mine{% if search %}&search={{ search|urlencode }}{% endif %}"
+           class="btn btn-outline-primary {% if view_mode == 'mine' %}active{% endif %}">
+            My Tasks
+        </a>
+        {% endif %}
+    </div>
+
+    <form method="get" class="row g-3 align-items-end">
+        <input type="hidden" name="view" value="{{ view_mode }}">
+        <div class="col-md-2">
+            <label class="form-label">Date</label>
+            <input type="date" class="form-control" name="date" value="{{ selected_date|date:'Y-m-d' }}"
+                   min="{{ today|date:'Y-m-d' }}" max="{{ max_date|date:'Y-m-d' }}">
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">Search</label>
+            <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Task title or description">
+        </div>
+        {% if view_mode == 'team' %}
+        <div class="col-md-2">
+            <label class="form-label">Department</label>
+            <select class="form-select" name="department">
+                <option value="">All</option>
+                {% for dept in departments %}
+                <option value="{{ dept.name }}" {% if department == dept.name %}selected{% endif %}>{{ dept.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Filter</button>
+        </div>
+    </form>
+</div>
+
+{% if can_add and view_mode == 'mine' %}
+<div class="todo-card mb-3">
+    <h5 class="mb-3"><i class="fas fa-plus me-2"></i>Add My Task</h5>
+    <form method="post" action="{% url 'todos-add-task' %}">
+        {% csrf_token %}
+        <input type="hidden" name="task_date" value="{{ selected_date|date:'Y-m-d' }}">
+        <div class="row g-2">
+            <div class="col-md-9">
+                <textarea class="form-control" name="description" rows="2" placeholder="Task description" required></textarea>
+            </div>
+            <div class="col-md-3 d-flex align-items-stretch">
+                <button type="submit" class="btn btn-success w-100">Add Task</button>
+            </div>
+        </div>
+        <small class="text-muted">Tasks are auto-numbered (Task-01, Task-02...) for the selected date (today up to 30 days ahead).</small>
+    </form>
+</div>
+{% elif has_employee_profile and view_mode == 'team' %}
+<div class="alert alert-light border">
+    Switch to <a href="?date={{ selected_date|date:'Y-m-d' }}&view=mine">My Tasks</a> to add your own tasks.
+</div>
+{% endif %}
+
+{% if can_add_for_team and view_mode == 'team' %}
+<div class="todo-card mb-3">
+    <h5 class="mb-3"><i class="fas fa-user-plus me-2"></i>Add Task for Employee</h5>
+    <form method="post" action="{% url 'todos-add-task' %}">
+        {% csrf_token %}
+        <input type="hidden" name="task_date" value="{{ selected_date|date:'Y-m-d' }}">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <select class="form-select" name="employee_id" required>
+                    <option value="">Select employee</option>
+                    {% for emp in addable_employees %}
+                    <option value="{{ emp.id }}">{{ emp.name }} ({{ emp.employee_id }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-6">
+                <textarea class="form-control" name="description" rows="2" placeholder="Task description" required></textarea>
+            </div>
+            <div class="col-md-3 d-flex align-items-stretch">
+                <button type="submit" class="btn btn-success w-100">Add Task</button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endif %}
+
+{% if tasks %}
+    {% if pending_tasks %}
+    <div class="section-header">
+        <i class="fas fa-circle-notch"></i> Pending
+        <span class="badge bg-secondary">{{ pending_count }}</span>
+    </div>
+    {% for task in pending_tasks %}
+    <div class="todo-card">
+        <div class="d-flex align-items-start gap-3">
+            {% if view_mode == 'mine' or user.is_superuser %}
+            <form method="post" action="{% url 'todos-toggle-complete' task.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="is_completed" value="1">
+                <button type="submit" class="complete-btn" title="Mark complete">
+                    <i class="fas fa-check" style="opacity:0.3;font-size:0.85rem;"></i>
+                </button>
+            </form>
+            {% else %}
+            <div class="complete-btn" style="cursor:default;opacity:0.5;">
+                <i class="fas fa-check" style="opacity:0.3;font-size:0.85rem;"></i>
+            </div>
+            {% endif %}
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                    <strong class="task-title">{{ task.title }}</strong>
+                    <span class="status-badge status-pending">Not complete yet</span>
+                </div>
+                {% if view_mode == 'team' %}
+                <div class="text-muted small mb-1">
+                    {{ task.employee.name }} ({{ task.employee.employee_id }})
+                    {% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                </div>
+                {% endif %}
+                <p class="mb-0 task-desc">{{ task.description }}</p>
+            </div>
+            {% if view_mode == 'mine' %}
+            <div class="d-flex gap-1">
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#edit-task-{{ task.id }}" aria-expanded="false">
+                    <i class="fas fa-edit"></i>
+                </button>
+                {% endif %}
+                <form method="post" action="{% url 'todos-delete-task' task.id %}" onsubmit="return confirm('Are you sure?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+        {% if view_mode == 'mine' and can_edit %}
+        <div class="collapse mt-3 ms-5" id="edit-task-{{ task.id }}">
+            <form method="post" action="{% url 'todos-update-task' task.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <label class="form-label small text-muted">Edit description</label>
+                <textarea class="form-control mb-2" name="description" rows="3" required>{{ task.description }}</textarea>
+                <button type="submit" class="btn btn-sm btn-primary">Save changes</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {% if completed_tasks %}
+    <div class="section-header">
+        <i class="fas fa-check-circle text-success"></i> Completed
+        <span class="badge bg-success">{{ completed_count }}</span>
+    </div>
+    {% if completed_count > 5 %}
+    <div class="mb-2">
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" data-bs-target="#completed-section" aria-expanded="true">
+            <i class="fas fa-chevron-down me-1"></i>Show / hide completed
+        </button>
+    </div>
+    <div class="collapse show" id="completed-section">
+    {% endif %}
+    {% for task in completed_tasks %}
+    <div class="todo-card completed">
+        <div class="d-flex align-items-start gap-3">
+            {% if view_mode == 'mine' or user.is_superuser %}
+            <form method="post" action="{% url 'todos-toggle-complete' task.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <input type="hidden" name="is_completed" value="0">
+                <button type="submit" class="complete-btn is-done" title="Mark not complete">
+                    <i class="fas fa-check" style="font-size:0.85rem;"></i>
+                </button>
+            </form>
+            {% else %}
+            <div class="complete-btn is-done" style="cursor:default;">
+                <i class="fas fa-check" style="font-size:0.85rem;"></i>
+            </div>
+            {% endif %}
+            <div class="flex-grow-1">
+                <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                    <strong class="task-title">{{ task.title }}</strong>
+                    <span class="status-badge status-completed">Completed</span>
+                    {% if task.completed_at %}
+                    <span class="text-muted small">{{ task.completed_at|date:"d M Y, g:i A" }}</span>
+                    {% endif %}
+                </div>
+                {% if view_mode == 'team' %}
+                <div class="text-muted small mb-1">
+                    {{ task.employee.name }} ({{ task.employee.employee_id }})
+                    {% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                </div>
+                {% endif %}
+                <p class="mb-0 task-desc">{{ task.description }}</p>
+            </div>
+            {% if view_mode == 'mine' %}
+            <div class="d-flex gap-1">
+                {% if can_edit %}
+                <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#edit-task-{{ task.id }}" aria-expanded="false">
+                    <i class="fas fa-edit"></i>
+                </button>
+                {% endif %}
+                <form method="post" action="{% url 'todos-delete-task' task.id %}" onsubmit="return confirm('Are you sure?');">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+        {% if view_mode == 'mine' and can_edit %}
+        <div class="collapse mt-3 ms-5" id="edit-task-{{ task.id }}">
+            <form method="post" action="{% url 'todos-update-task' task.id %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <label class="form-label small text-muted">Edit description</label>
+                <textarea class="form-control mb-2" name="description" rows="3" required>{{ task.description }}</textarea>
+                <button type="submit" class="btn btn-sm btn-primary">Save changes</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% if completed_count > 5 %}
+    </div>
+    {% endif %}
+    {% endif %}
+{% else %}
+<div class="todo-card text-center text-muted py-5">
+    No tasks found for this date.
+</div>
+{% endif %}
+{% endblock %}

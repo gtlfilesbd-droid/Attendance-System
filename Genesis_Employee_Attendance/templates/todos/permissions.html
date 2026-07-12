@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block title %}TO-DO Permissions - Genesis Employee Attendance{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h2><i class="fas fa-lock me-2"></i>TO-DO Permissions</h2>
+    <p>Control employee edit/delete permissions</p>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table mb-0">
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th>Can Edit</th>
+                    <th>Can Delete</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr>
+                    <form method="post">
+                        {% csrf_token %}
+                        <input type="hidden" name="employee_id" value="{{ row.employee.id }}">
+                        <td>{{ row.employee.name }} ({{ row.employee.employee_id }})</td>
+                        <td>{{ row.employee.department.name|default:"—" }}</td>
+                        <td><input type="checkbox" name="can_edit" {% if row.can_edit %}checked{% endif %}></td>
+                        <td><input type="checkbox" name="can_delete" {% if row.can_delete %}checked{% endif %}></td>
+                        <td><button type="submit" class="btn btn-sm btn-primary">Save</button></td>
+                    </form>
+                </tr>
+                {% empty %}
+                <tr><td colspan="5" class="text-muted">No employees found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="mt-3">
+    <a href="{% url 'todos-dashboard' %}" class="btn btn-outline-secondary">Back to TO-DO</a>
+</div>
+{% endblock %}

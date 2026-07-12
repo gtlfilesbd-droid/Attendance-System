@@ -48,6 +48,13 @@ def api_root(request, format=None):
                 'attendance_report': f'{base_url}/attendance/report/',
                 'attendance_list': f'{base_url}/attendance/attendance/',
             },
+            'todos': {
+                'my_tasks': f'{base_url}/todos/my-tasks/',
+                'tasks': f'{base_url}/todos/tasks/',
+                'team_tasks': f'{base_url}/todos/team-tasks/',
+                'report': f'{base_url}/todos/report/',
+                'export': f'{base_url}/todos/export/',
+            },
         },
         'documentation': {
             'api_docs': 'See API_VIEWS_DOCUMENTATION.md for detailed documentation',

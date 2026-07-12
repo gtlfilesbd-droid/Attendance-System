@@ -19,6 +19,7 @@ import '../services/foreground_refresh_service.dart';
 import '../services/push_notification_service.dart';
 import 'attendance_screen.dart';
 import 'profile_screen.dart';
+import 'todo_list_screen.dart';
 
 /// Nominatim reverse geocode: returns short address string or null on failure.
 /// Prefers more specific OSM keys (quarter, residential, suburb) over broader (neighbourhood).
@@ -1060,18 +1061,36 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildQuickActionCards(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
-    return _buildActionButton(
-      context,
-      title: 'View My Attendance',
-      subtitle: 'View sessions',
-      icon: Icons.calendar_today_outlined,
-      color: colorScheme.primary,
-      onTap: () {
-        Navigator.push(
+    return Column(
+      children: [
+        _buildActionButton(
           context,
-          MaterialPageRoute(builder: (context) => const AttendanceScreen()),
-        );
-      },
+          title: 'View My Attendance',
+          subtitle: 'View sessions',
+          icon: Icons.calendar_today_outlined,
+          color: colorScheme.primary,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const AttendanceScreen()),
+            );
+          },
+        ),
+        const SizedBox(height: 12),
+        _buildActionButton(
+          context,
+          title: 'TO-DO',
+          subtitle: 'Tasks & checklist',
+          icon: Icons.checklist_outlined,
+          color: colorScheme.secondary,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const TodoListScreen()),
+            );
+          },
+        ),
+      ],
     );
   }
 

@@ -398,6 +398,12 @@
                     <span>Reports</span>
                 </a>
             </li>
+            <li>
+                <a href="{% url 'todos-dashboard' %}" class="{% if 'todos' in request.path %}active{% endif %}">
+                    <i class="fas fa-tasks"></i>
+                    <span>TO-DO</span>
+                </a>
+            </li>
             <li style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1);">
                 <a href="/admin/" target="_blank">
                     <i class="fas fa-cog"></i>

@@ -611,4 +611,124 @@ class ApiService {
       'error': "Couldn't load attendance. Check connection.",
     };
   }
+
+  /// GET /todos/my-tasks/
+  Future<List<Map<String, dynamic>>> getMyTodos({
+    String? taskDate,
+    String? taskDateFrom,
+    String? taskDateTo,
+    String? search,
+  }) async {
+    try {
+      final queryParams = <String, dynamic>{};
+      if (taskDate != null) queryParams['task_date'] = taskDate;
+      if (taskDateFrom != null) queryParams['task_date_from'] = taskDateFrom;
+      if (taskDateTo != null) queryParams['task_date_to'] = taskDateTo;
+      if (search != null && search.isNotEmpty) queryParams['search'] = search;
+
+      final response = await _dio.get(
+        AppConfig.myTodosEndpoint,
+        queryParameters: queryParams.isEmpty ? null : queryParams,
+      );
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        final data = response.data['data'];
+        if (data is List) {
+          return data.cast<Map<String, dynamic>>();
+        }
+      }
+      return [];
+    } catch (e) {
+      if (kDebugMode) print('API: getMyTodos error: $e');
+      return [];
+    }
+  }
+
+  /// POST /todos/tasks/
+  Future<Map<String, dynamic>?> createTodo({
+    required String description,
+    required String taskDate,
+  }) async {
+    try {
+      final response = await _dio.post(
+        AppConfig.todosEndpoint,
+        data: {
+          'description': description,
+          'task_date': taskDate,
+        },
+      );
+      if ((response.statusCode == 200 || response.statusCode == 201) &&
+          response.data is Map &&
+          response.data['success'] == true &&
+          response.data['data'] is Map) {
+        return Map<String, dynamic>.from(response.data['data'] as Map);
+      }
+      final message = response.data is Map ? response.data['message']?.toString() : null;
+      return {'error': message ?? 'Failed to create task'};
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final message = data is Map ? data['message']?.toString() : e.message;
+      return {'error': message ?? 'Failed to create task'};
+    } catch (e) {
+      return {'error': 'Failed to create task'};
+    }
+  }
+
+  /// PATCH /todos/tasks/{id}/
+  Future<Map<String, dynamic>?> updateTodo({
+    required String id,
+    required String description,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '${AppConfig.todosEndpoint}$id/',
+        data: {'description': description},
+      );
+      if (response.statusCode == 200 &&
+          response.data is Map &&
+          response.data['success'] == true &&
+          response.data['data'] is Map) {
+        return Map<String, dynamic>.from(response.data['data'] as Map);
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) print('API: updateTodo error: $e');
+      return null;
+    }
+  }
+
+  /// DELETE /todos/tasks/{id}/
+  Future<bool> deleteTodo(String id) async {
+    try {
+      final response = await _dio.delete('${AppConfig.todosEndpoint}$id/');
+      return response.statusCode == 200 &&
+          response.data is Map &&
+          response.data['success'] == true;
+    } catch (e) {
+      if (kDebugMode) print('API: deleteTodo error: $e');
+      return false;
+    }
+  }
+
+  /// PATCH /todos/tasks/{id}/complete/
+  Future<Map<String, dynamic>?> toggleTodoComplete({
+    required String id,
+    required bool isCompleted,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '${AppConfig.todosEndpoint}$id/complete/',
+        data: {'is_completed': isCompleted},
+      );
+      if (response.statusCode == 200 &&
+          response.data is Map &&
+          response.data['success'] == true &&
+          response.data['data'] is Map) {
+        return Map<String, dynamic>.from(response.data['data'] as Map);
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) print('API: toggleTodoComplete error: $e');
+      return null;
+    }
+  }
 }

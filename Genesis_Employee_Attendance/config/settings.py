@@ -56,6 +56,7 @@ INSTALLED_APPS = [
     'tracking',
     'attendance',
     'audit',
+    'todos',
 ]
 
 MIDDLEWARE = [

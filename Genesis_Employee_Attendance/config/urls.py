@@ -91,9 +91,11 @@ urlpatterns = [
     path('api/audit/', include('audit.urls')),
     path('api/tracking/', include('tracking.urls')),
     path('api/attendance/', include('attendance.urls')),
+    path('api/todos/', include('todos.urls')),
 
     # Web dashboard (templates)
     path('dashboard/', include('tracking.dashboard_urls')),
+    path('dashboard/todos/', include('todos.dashboard_urls')),
     
     # Logout
     path('logout/', LogoutView.as_view(next_page='/dashboard/'), name='logout'),

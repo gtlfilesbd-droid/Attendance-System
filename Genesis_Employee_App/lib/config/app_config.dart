@@ -26,6 +26,10 @@ class AppConfig {
   /// Phase 2: Mobile log bulk upload
   static const String mobileLogsBulkEndpoint = '/audit/mobile-logs/bulk/';
 
+  // To-Do module
+  static const String todosEndpoint = '/todos/tasks/';
+  static const String myTodosEndpoint = '/todos/my-tasks/';
+
   // Location Tracking Configuration
   static const int locationUpdateInterval = 300; // 5 minutes in seconds (e.g. for docs)
   /// Interval in seconds when duty is active (Start Duty). Used when moving slowly / standing.
