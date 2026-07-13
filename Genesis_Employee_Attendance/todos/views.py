@@ -89,7 +89,7 @@ def _staff_queryset(user):
     permitted = get_permitted_departments(user)
     return TodoTask.objects.filter(
         employee__department__in=permitted
-    ).select_related('employee', 'employee__department')
+    ).select_related('employee', 'employee__department', 'assigned_by')
 
 
 def _report_aggregates(queryset):
@@ -108,7 +108,7 @@ class TodoTaskViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = TodoTask.objects.select_related('employee', 'employee__department')
+        qs = TodoTask.objects.select_related('employee', 'employee__department', 'assigned_by')
         if isinstance(user, Employee):
             return _filter_tasks_queryset(qs.filter(employee=user), self.request)
         if getattr(user, 'is_staff', False):
@@ -292,9 +292,10 @@ def export_todos_csv(request):
     writer = csv.writer(response)
     writer.writerow([
         'Employee ID', 'Employee Name', 'Department', 'Task Date',
-        'Task', 'Description', 'Completed', 'Completed At', 'Created At',
+        'Task', 'Description', 'Completed', 'Completed At', 'Assigned By', 'Created At',
     ])
     for task in queryset:
+        assigner = task.assigner_display or ''
         writer.writerow([
             task.employee.employee_id,
             task.employee.name,
@@ -304,6 +305,7 @@ def export_todos_csv(request):
             task.description,
             'Yes' if task.is_completed else 'No',
             task.completed_at.strftime('%Y-%m-%d %H:%M:%S') if task.completed_at else '',
+            assigner,
             task.created_at.strftime('%Y-%m-%d %H:%M:%S'),
         ])
     return response

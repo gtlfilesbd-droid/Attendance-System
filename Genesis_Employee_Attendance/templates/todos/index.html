@@ -299,8 +299,15 @@
                 </div>
                 {% if view_mode == 'team' %}
                 <div class="text-muted small mb-1">
-                    {{ task.employee.name }} ({{ task.employee.employee_id }})
-                    {% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% if task.assigner_display %}
+                    {{ task.assigner_display }} assigned a task for {{ task.employee.name }} ({{ task.employee.employee_id }}){% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% else %}
+                    {{ task.employee.name }} ({{ task.employee.employee_id }}){% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% endif %}
+                </div>
+                {% elif task.assigner_display %}
+                <div class="text-muted small mb-1">
+                    {{ task.assigner_display }} assigned this task
                 </div>
                 {% endif %}
                 <p class="mb-0 task-desc">{{ task.description }}</p>
@@ -375,8 +382,15 @@
                 </div>
                 {% if view_mode == 'team' %}
                 <div class="text-muted small mb-1">
-                    {{ task.employee.name }} ({{ task.employee.employee_id }})
-                    {% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% if task.assigner_display %}
+                    {{ task.assigner_display }} assigned a task for {{ task.employee.name }} ({{ task.employee.employee_id }}){% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% else %}
+                    {{ task.employee.name }} ({{ task.employee.employee_id }}){% if task.employee.department %} · {{ task.employee.department.name }}{% endif %}
+                    {% endif %}
+                </div>
+                {% elif task.assigner_display %}
+                <div class="text-muted small mb-1">
+                    {{ task.assigner_display }} assigned this task
                 </div>
                 {% endif %}
                 <p class="mb-0 task-desc">{{ task.description }}</p>

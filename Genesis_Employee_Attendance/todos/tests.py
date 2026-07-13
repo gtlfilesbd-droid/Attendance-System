@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from employees.models import Department, Employee, UserDepartmentPermission
+from .dashboard_views import todos_add_task
 from .models import EmployeeTodoPermission, TodoTask
 from .utils import format_task_title, get_next_sort_order, validate_task_date_for_create
 
@@ -188,3 +189,92 @@ class TodoAPITest(TestCase):
         if isinstance(results, dict):
             results = results.get('results', [])
         self.assertEqual(len(results), 1)
+
+
+class TodoDashboardAssignTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='IT')
+        self.assigner = _create_employee(employee_id='EMP001', email='ashraf@test.com', department=self.department)
+        self.assignee = _create_employee(employee_id='EMP008', email='anam@test.com', department=self.department)
+        self.assigner.name = 'Ashraf'
+        self.assigner.save(update_fields=['name'])
+        self.assignee.name = 'Anam'
+        self.assignee.save(update_fields=['name'])
+        self.staff = User.objects.create_user(username='staff-linked', password='pass', is_staff=True)
+        self.assigner.user = self.staff
+        self.assigner.save(update_fields=['user'])
+        perm = UserDepartmentPermission.objects.create(user=self.staff)
+        perm.departments.add(self.department)
+        self.today = timezone.localdate()
+
+    def test_team_add_sets_assigned_by_linked_employee(self):
+        from django.test import RequestFactory
+
+        rf = RequestFactory()
+        request = rf.post('/dashboard/todos/add/', {
+            'employee_id': str(self.assignee.id),
+            'description': 'Assigned task',
+            'task_date': self.today.isoformat(),
+            'add_for_team': '1',
+        })
+        request.user = self.staff
+        response = todos_add_task(request)
+        self.assertEqual(response.status_code, 302)
+
+        task = TodoTask.objects.get(description='Assigned task')
+        self.assertEqual(task.employee_id, self.assignee.id)
+        self.assertEqual(task.assigned_by_id, self.assigner.id)
+        self.assertIsNone(task.assigned_by_username)
+        self.assertEqual(
+            task.assigner_display,
+            f'{self.assigner.name} ({self.assigner.employee_id})',
+        )
+
+    def test_team_add_without_linked_employee_uses_username(self):
+        from django.test import RequestFactory
+
+        staff = User.objects.create_user(username='adminstaff', password='pass', is_staff=True)
+        perm = UserDepartmentPermission.objects.create(user=staff)
+        perm.departments.add(self.department)
+
+        rf = RequestFactory()
+        request = rf.post('/dashboard/todos/add/', {
+            'employee_id': str(self.assignee.id),
+            'description': 'Username assigned task',
+            'task_date': self.today.isoformat(),
+            'add_for_team': '1',
+        })
+        request.user = staff
+        response = todos_add_task(request)
+        self.assertEqual(response.status_code, 302)
+
+        task = TodoTask.objects.get(description='Username assigned task')
+        self.assertIsNone(task.assigned_by_id)
+        self.assertEqual(task.assigned_by_username, 'adminstaff')
+        self.assertEqual(task.assigner_display, 'adminstaff')
+
+    def test_my_tasks_api_returns_assigner_display(self):
+        task = TodoTask.objects.create(
+            employee=self.assignee,
+            assigned_by=self.assigner,
+            title='Task-01',
+            description='From Ashraf',
+            task_date=self.today,
+            sort_order=1,
+        )
+        client = _auth_client(self.assignee)
+        response = client.get(f'/api/todos/my-tasks/?task_date={self.today.isoformat()}')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        item = response.data['data'][0]
+        self.assertEqual(item['assigner_display'], f'{self.assigner.name} ({self.assigner.employee_id})')
+        self.assertIn('assigned a task for', item['assignment_label'])
+        self.assertIn(self.assignee.name, item['assignment_label'])
+
+    def test_self_created_task_has_no_assigner(self):
+        response = _auth_client(self.assignee).post('/api/todos/tasks/', {
+            'description': 'My own task',
+            'task_date': self.today.isoformat(),
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIsNone(response.data['data']['assigner_display'])
+        self.assertIsNone(response.data['data']['assignment_label'])

@@ -348,6 +348,15 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             ),
                         ],
                       ),
+                      if (task.assignerDisplay != null && task.assignerDisplay!.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '${task.assignerDisplay} assigned this task',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         task.description,

@@ -178,6 +178,16 @@ class _TodoDetailScreenState extends State<TodoDetailScreen> {
                 ),
               ),
             const SizedBox(height: 16),
+            if (_task.assignerDisplay != null && _task.assignerDisplay!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Text(
+                  '${_task.assignerDisplay} assigned this task',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
             Text('Description', style: theme.textTheme.titleSmall),
             const SizedBox(height: 8),
             Text(

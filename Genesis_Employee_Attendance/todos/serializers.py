@@ -10,6 +10,12 @@ class TodoTaskSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source='employee.name', read_only=True)
     employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
     department_name = serializers.CharField(source='employee.department.name', read_only=True, allow_null=True)
+    assigned_by_name = serializers.CharField(source='assigned_by.name', read_only=True, allow_null=True)
+    assigned_by_employee_id_display = serializers.CharField(
+        source='assigned_by.employee_id', read_only=True, allow_null=True,
+    )
+    assigner_display = serializers.SerializerMethodField()
+    assignment_label = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
     can_delete = serializers.SerializerMethodField()
 
@@ -17,13 +23,31 @@ class TodoTaskSerializer(serializers.ModelSerializer):
         model = TodoTask
         fields = [
             'id', 'employee', 'employee_name', 'employee_id_display', 'department_name',
+            'assigned_by', 'assigned_by_name', 'assigned_by_employee_id_display',
+            'assigned_by_username', 'assigner_display', 'assignment_label',
             'title', 'description', 'is_completed', 'completed_at', 'task_date', 'sort_order',
             'can_edit', 'can_delete', 'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'employee', 'title', 'sort_order', 'is_completed', 'completed_at',
+            'assigned_by', 'assigned_by_username',
             'created_at', 'updated_at', 'employee_name', 'employee_id_display', 'department_name',
+            'assigned_by_name', 'assigned_by_employee_id_display', 'assigner_display', 'assignment_label',
         ]
+
+    def get_assigner_display(self, obj):
+        return obj.assigner_display
+
+    def get_assignment_label(self, obj):
+        assigner = obj.assigner_display
+        if not assigner:
+            return None
+        label = (
+            f'{assigner} assigned a task for {obj.employee.name} ({obj.employee.employee_id})'
+        )
+        if obj.employee.department_id:
+            label += f' · {obj.employee.department.name}'
+        return label
 
     def get_can_edit(self, obj):
         request = self.context.get('request')

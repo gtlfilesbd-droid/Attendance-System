@@ -8,6 +8,8 @@ class TodoTask {
   final int sortOrder;
   final bool canEdit;
   final bool canDelete;
+  final String? assignerDisplay;
+  final String? assignmentLabel;
 
   const TodoTask({
     required this.id,
@@ -19,6 +21,8 @@ class TodoTask {
     required this.sortOrder,
     this.canEdit = true,
     this.canDelete = true,
+    this.assignerDisplay,
+    this.assignmentLabel,
   });
 
   bool get isPending => !isCompleted;
@@ -36,6 +40,8 @@ class TodoTask {
           : int.tryParse(json['sort_order']?.toString() ?? '0') ?? 0,
       canEdit: json['can_edit'] != false,
       canDelete: json['can_delete'] != false,
+      assignerDisplay: json['assigner_display']?.toString(),
+      assignmentLabel: json['assignment_label']?.toString(),
     );
   }
 }

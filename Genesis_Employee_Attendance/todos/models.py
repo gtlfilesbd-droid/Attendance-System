@@ -16,6 +16,14 @@ class TodoTask(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     task_date = models.DateField(db_index=True)
     sort_order = models.PositiveIntegerField()
+    assigned_by = models.ForeignKey(
+        'employees.Employee',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='todo_tasks_assigned',
+    )
+    assigned_by_username = models.CharField(max_length=150, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -41,6 +49,14 @@ class TodoTask(models.Model):
     @property
     def is_pending(self):
         return not self.is_completed
+
+    @property
+    def assigner_display(self):
+        if self.assigned_by_id:
+            return f'{self.assigned_by.name} ({self.assigned_by.employee_id})'
+        if self.assigned_by_username:
+            return self.assigned_by_username
+        return None
 
 
 class EmployeeTodoPermission(models.Model):

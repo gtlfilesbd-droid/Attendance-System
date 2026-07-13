@@ -66,7 +66,7 @@ def todos_dashboard(request):
         queryset = TodoTask.objects.filter(employee__department__in=permitted)
         view_mode = 'team'
 
-    queryset = queryset.select_related('employee', 'employee__department')
+    queryset = queryset.select_related('employee', 'employee__department', 'assigned_by')
     queryset = queryset.filter(task_date=selected_date)
     if search:
         queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
@@ -176,13 +176,20 @@ def todos_add_task(request):
         try:
             validate_task_date_for_create(task_date)
             sort_order = get_next_sort_order(employee, task_date)
-            TodoTask.objects.create(
-                employee=employee,
-                title=format_task_title(sort_order),
-                description=description,
-                task_date=task_date,
-                sort_order=sort_order,
-            )
+            create_kwargs = {
+                'employee': employee,
+                'title': format_task_title(sort_order),
+                'description': description,
+                'task_date': task_date,
+                'sort_order': sort_order,
+            }
+            if team_add:
+                assigner = resolve_employee(request.user)
+                if assigner and assigner.id != employee.id:
+                    create_kwargs['assigned_by'] = assigner
+                elif not assigner:
+                    create_kwargs['assigned_by_username'] = request.user.get_username()
+            TodoTask.objects.create(**create_kwargs)
         except Exception:
             pass
 
