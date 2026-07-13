@@ -1061,36 +1061,43 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildQuickActionCards(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
-    return Column(
-      children: [
-        _buildActionButton(
-          context,
-          title: 'View My Attendance',
-          subtitle: 'View sessions',
-          icon: Icons.calendar_today_outlined,
-          color: colorScheme.primary,
-          onTap: () {
-            Navigator.push(
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: _buildActionButton(
               context,
-              MaterialPageRoute(builder: (context) => const AttendanceScreen()),
-            );
-          },
-        ),
-        const SizedBox(height: 12),
-        _buildActionButton(
-          context,
-          title: 'TO-DO',
-          subtitle: 'Tasks & checklist',
-          icon: Icons.checklist_outlined,
-          color: colorScheme.secondary,
-          onTap: () {
-            Navigator.push(
+              title: 'View My\nAttendance',
+              subtitle: 'View sessions',
+              icon: Icons.calendar_today_outlined,
+              color: colorScheme.primary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AttendanceScreen()),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: _buildActionButton(
               context,
-              MaterialPageRoute(builder: (context) => const TodoListScreen()),
-            );
-          },
-        ),
-      ],
+              title: 'TO-DO\nTask',
+              subtitle: 'Tasks & checklist',
+              icon: Icons.checklist_outlined,
+              color: colorScheme.secondary,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const TodoListScreen()),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 

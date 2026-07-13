@@ -140,33 +140,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
       return;
     }
 
-    final controller = TextEditingController();
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Task'),
-        content: TextField(
-          controller: controller,
-          maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: 'Task description',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isEmpty) return;
-              Navigator.pop(context, text);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (context) => const _AddTaskDialog(),
     );
-    controller.dispose();
 
     if (result == null || !mounted) return;
 
@@ -665,6 +642,62 @@ class _TodoListScreenState extends State<TodoListScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AddTaskDialog extends StatefulWidget {
+  const _AddTaskDialog();
+
+  @override
+  State<_AddTaskDialog> createState() => _AddTaskDialogState();
+}
+
+class _AddTaskDialogState extends State<_AddTaskDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    Navigator.pop(context, text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Task'),
+      content: TextField(
+        controller: _controller,
+        maxLines: 4,
+        autofocus: true,
+        decoration: const InputDecoration(
+          hintText: 'Task description',
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (_) => _save(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

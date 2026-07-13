@@ -57,7 +57,7 @@ void main() {
       await tester.pump(const Duration(seconds: 2));
 
       expect(find.text('View My\nAttendance'), findsOneWidget);
-      expect(find.text("View Today's\nRoute"), findsOneWidget);
+      expect(find.text('TO-DO\nTask'), findsOneWidget);
     });
 
     testWidgets('displays working hours info', (WidgetTester tester) async {
