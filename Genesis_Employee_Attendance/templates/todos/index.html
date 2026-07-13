@@ -167,7 +167,7 @@
 
 <div class="todo-filters">
     <div class="view-tabs btn-group mb-3" role="group">
-        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=team{% if search %}&search={{ search|urlencode }}{% endif %}{% if department %}&department={{ department|urlencode }}{% endif %}"
+        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=team{% if search %}&search={{ search|urlencode }}{% endif %}{% if department %}&department={{ department|urlencode }}{% endif %}{% if employee_filter %}&employee={{ employee_filter|urlencode }}{% endif %}"
            class="btn btn-outline-primary {% if view_mode == 'team' %}active{% endif %}">
             Team Tasks
         </a>
@@ -186,20 +186,32 @@
             <input type="date" class="form-control" name="date" value="{{ selected_date|date:'Y-m-d' }}"
                    min="{{ today|date:'Y-m-d' }}" max="{{ max_date|date:'Y-m-d' }}">
         </div>
-        <div class="col-md-3">
+        <div class="col-md-{% if view_mode == 'team' %}2{% else %}3{% endif %}">
             <label class="form-label">Search</label>
             <input type="text" class="form-control" name="search" value="{{ search }}" placeholder="Task title or description">
         </div>
         {% if view_mode == 'team' %}
         <div class="col-md-2">
             <label class="form-label">Department</label>
-            <select class="form-select" name="department">
+            <select class="form-select" name="department" id="todo-department-filter">
                 <option value="">All</option>
                 {% for dept in departments %}
                 <option value="{{ dept.name }}" {% if department == dept.name %}selected{% endif %}>{{ dept.name }}</option>
                 {% endfor %}
             </select>
         </div>
+        <div class="col-md-2">
+            <label class="form-label">Employee</label>
+            <select class="form-select" name="employee" id="todo-employee-filter">
+                <option value="">All</option>
+                {% for emp in filter_employees %}
+                <option value="{{ emp.id }}" {% if employee_filter == emp.id|stringformat:"s" %}selected{% endif %}>
+                    {{ emp.name }} ({{ emp.employee_id }}){% if not emp.is_active %} (inactive){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {{ filter_employees_all|json_script:"todo-filter-employees-data" }}
         {% endif %}
         <div class="col-md-2">
             <button type="submit" class="btn btn-primary w-100">Filter</button>
@@ -404,5 +416,59 @@
 <div class="todo-card text-center text-muted py-5">
     No tasks found for this date.
 </div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+{% if view_mode == 'team' %}
+<script>
+(function () {
+    const deptSelect = document.getElementById('todo-department-filter');
+    const empSelect = document.getElementById('todo-employee-filter');
+    const dataEl = document.getElementById('todo-filter-employees-data');
+    if (!deptSelect || !empSelect || !dataEl) return;
+
+    const allEmployees = JSON.parse(dataEl.textContent);
+    const initialEmployee = '{{ employee_filter|escapejs }}';
+
+    function employeeLabel(emp) {
+        let label = emp.name + ' (' + emp.employee_id + ')';
+        if (!emp.is_active) label += ' (inactive)';
+        return label;
+    }
+
+    function rebuildEmployeeOptions(preselectId) {
+        const dept = deptSelect.value;
+        const filtered = dept
+            ? allEmployees.filter(function (emp) { return emp.department === dept; })
+            : allEmployees;
+
+        empSelect.innerHTML = '';
+        const allOpt = document.createElement('option');
+        allOpt.value = '';
+        allOpt.textContent = 'All';
+        empSelect.appendChild(allOpt);
+
+        filtered.forEach(function (emp) {
+            const opt = document.createElement('option');
+            opt.value = emp.id;
+            opt.textContent = employeeLabel(emp);
+            empSelect.appendChild(opt);
+        });
+
+        if (preselectId && filtered.some(function (emp) { return emp.id === preselectId; })) {
+            empSelect.value = preselectId;
+        } else {
+            empSelect.value = '';
+        }
+    }
+
+    deptSelect.addEventListener('change', function () {
+        rebuildEmployeeOptions('');
+    });
+
+    rebuildEmployeeOptions(initialEmployee);
+})();
+</script>
 {% endif %}
 {% endblock %}

@@ -25,6 +25,14 @@ def _require_staff(user):
     return user.is_authenticated and user.is_staff
 
 
+def _employees_for_team_filter(request, department_name=''):
+    permitted = get_permitted_departments(request.user)
+    qs = Employee.objects.filter(department__in=permitted).select_related('department').order_by('name')
+    if department_name:
+        qs = qs.filter(department__name=department_name)
+    return qs
+
+
 @login_required
 def todos_dashboard(request):
     if not _require_staff(request.user):
@@ -44,6 +52,7 @@ def todos_dashboard(request):
 
     search = request.GET.get('search', '').strip()
     department = request.GET.get('department', '').strip()
+    employee_filter = request.GET.get('employee', '').strip()
     view_mode = request.GET.get('view')
     employee = resolve_employee(request.user)
     permitted = get_permitted_departments(request.user)
@@ -63,6 +72,10 @@ def todos_dashboard(request):
         queryset = queryset.filter(Q(title__icontains=search) | Q(description__icontains=search))
     if department:
         queryset = queryset.filter(employee__department__name=department)
+    if employee_filter and view_mode == 'team':
+        filterable = _employees_for_team_filter(request, department)
+        if filterable.filter(pk=employee_filter).exists():
+            queryset = queryset.filter(employee_id=employee_filter)
     tasks = list(queryset.order_by('employee__name', 'sort_order'))
     pending_tasks = [t for t in tasks if not t.is_completed]
     completed_tasks = [t for t in tasks if t.is_completed]
@@ -84,6 +97,17 @@ def todos_dashboard(request):
             .order_by('name')
         )
     can_add_for_team = bool(addable_employees)
+    filter_employees = list(_employees_for_team_filter(request, department))
+    filter_employees_all = [
+        {
+            'id': str(emp.id),
+            'name': emp.name,
+            'employee_id': emp.employee_id,
+            'is_active': emp.is_active,
+            'department': emp.department.name if emp.department_id else '',
+        }
+        for emp in _employees_for_team_filter(request, '')
+    ]
 
     context = {
         'today': today,
@@ -91,6 +115,9 @@ def todos_dashboard(request):
         'selected_date': selected_date,
         'search': search,
         'department': department,
+        'employee_filter': employee_filter,
+        'filter_employees': filter_employees,
+        'filter_employees_all': filter_employees_all,
         'view_mode': view_mode,
         'tasks': tasks,
         'pending_tasks': pending_tasks,
