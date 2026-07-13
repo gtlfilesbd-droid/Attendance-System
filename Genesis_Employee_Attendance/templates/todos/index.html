@@ -136,6 +136,13 @@
 </div>
 {% endif %}
 
+{% if linked_employee_inactive %}
+<div class="alert alert-light border">
+    <strong>Note:</strong> Your employee profile is inactive for attendance tracking; personal My Tasks still work here.
+    Mobile app login is not available while your employee account is inactive.
+</div>
+{% endif %}
+
 {% if request.GET.link_required %}
 <div class="alert alert-warning">
     Link your dashboard user to an Employee profile before adding personal tasks.

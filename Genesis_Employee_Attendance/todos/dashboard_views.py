@@ -105,6 +105,7 @@ def todos_dashboard(request):
         'can_add_for_team': can_add_for_team,
         'addable_employees': addable_employees,
         'employee': employee,
+        'linked_employee_inactive': bool(employee and not employee.is_active),
     }
     return render(request, 'todos/index.html', context)
 

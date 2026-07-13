@@ -14,11 +14,20 @@ from .admin_export import AdminExportMixin
 
 
 def _employee_queryset_for_request(request):
-    qs = Employee.objects.filter(is_active=True).select_related('department').order_by('name')
+    qs = Employee.objects.select_related('department').order_by('name')
     if request.user.is_superuser:
         return qs
     permitted = get_permitted_departments(request.user)
     return qs.filter(department__in=permitted)
+
+
+def _employee_link_label(emp):
+    label = f'{emp.name} ({emp.employee_id})'
+    if not emp.is_active:
+        label += ' — INACTIVE'
+    if emp.department_id:
+        label += f' — {emp.department.name}'
+    return label
 
 
 def sync_user_employee_link(user, employee):
@@ -43,7 +52,7 @@ class UserChangeWithPasswordForm(forms.ModelForm):
         queryset=Employee.objects.none(),
         required=False,
         label='Linked employee',
-        help_text='Search by name, employee ID, email, or department. Leave empty to unlink.',
+        help_text='Search by name, employee ID, email, or department. Inactive employees can be linked for dashboard My Tasks. Leave empty to unlink.',
     )
 
     new_password1 = forms.CharField(
@@ -84,7 +93,7 @@ class UserAddWithEmployeeForm(UserCreationForm):
         queryset=Employee.objects.none(),
         required=False,
         label='Linked employee',
-        help_text='Search by name, employee ID, email, or department. Optional when creating a user.',
+        help_text='Search by name, employee ID, email, or department. Inactive employees can be linked for dashboard My Tasks.',
     )
 
     class Meta(UserCreationForm.Meta):
@@ -114,7 +123,10 @@ class UserAdminWithExport(AdminExportMixin, BaseUserAdmin):
         ('Personal info', {'fields': ('first_name', 'last_name', 'email')}),
         ('Employee link', {
             'fields': ('linked_employee',),
-            'description': 'Link this dashboard user to an employee for TO-DO and other employee features.',
+            'description': (
+                'Link this dashboard user to an employee for TO-DO My Tasks. '
+                'Inactive employees can be linked; they remain excluded from attendance tracking.'
+            ),
         }),
         ('Permissions', {'fields': ('is_active', 'is_staff', 'is_superuser', 'groups', 'user_permissions')}),
         ('Important dates', {'fields': ('last_login', 'date_joined')}),
@@ -137,9 +149,10 @@ class UserAdminWithExport(AdminExportMixin, BaseUserAdmin):
         except Employee.DoesNotExist:
             return '—'
         dept = emp.department.name if emp.department_id else ''
+        inactive = '' if emp.is_active else ' (inactive)'
         if dept:
-            return f'{emp.name} ({emp.employee_id}) · {dept}'
-        return f'{emp.name} ({emp.employee_id})'
+            return f'{emp.name} ({emp.employee_id}){inactive} · {dept}'
+        return f'{emp.name} ({emp.employee_id}){inactive}'
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
@@ -151,10 +164,7 @@ class UserAdminWithExport(AdminExportMixin, BaseUserAdmin):
                 DeviceToken._meta.get_field('employee'),
                 self.admin_site,
             )
-            form.base_fields['linked_employee'].label_from_instance = (
-                lambda emp: f'{emp.name} ({emp.employee_id})'
-                + (f' — {emp.department.name}' if emp.department_id else '')
-            )
+            form.base_fields['linked_employee'].label_from_instance = _employee_link_label
         return form
 
     def save_model(self, request, obj, form, change):
