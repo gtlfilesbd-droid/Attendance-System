@@ -278,3 +278,66 @@ class TodoDashboardAssignTest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertIsNone(response.data['data']['assigner_display'])
         self.assertIsNone(response.data['data']['assignment_label'])
+
+
+class TodoDashboardStatusFilterTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='IT')
+        self.employee = _create_employee(department=self.department)
+        self.staff = User.objects.create_user(username='staff-status', password='pass', is_staff=True)
+        self.employee.user = self.staff
+        self.employee.save(update_fields=['user'])
+        perm = UserDepartmentPermission.objects.create(user=self.staff)
+        perm.departments.add(self.department)
+        self.today = timezone.localdate()
+        TodoTask.objects.create(
+            employee=self.employee,
+            title='Task-01',
+            description='Pending task',
+            task_date=self.today,
+            sort_order=1,
+            is_completed=False,
+        )
+        TodoTask.objects.create(
+            employee=self.employee,
+            title='Task-02',
+            description='Done task',
+            task_date=self.today,
+            sort_order=2,
+            is_completed=True,
+        )
+
+    def test_status_filter_pending(self):
+        from django.test import Client, override_settings
+
+        with override_settings(ALLOWED_HOSTS=['testserver']):
+            client = Client()
+            client.force_login(self.staff)
+            response = client.get('/dashboard/todos/', {
+                'date': self.today.isoformat(),
+                'view': 'mine',
+                'status': 'pending',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['pending_tasks']), 1)
+        self.assertEqual(len(response.context['completed_tasks']), 1)
+        self.assertEqual(response.context['status_filter'], 'pending')
+        self.assertIn(b'data-task-group="pending"', response.content)
+        self.assertIn(b'data-task-group="completed"', response.content)
+        self.assertIn(b'id="todo-status-tabs"', response.content)
+
+    def test_status_filter_completed(self):
+        from django.test import Client, override_settings
+
+        with override_settings(ALLOWED_HOSTS=['testserver']):
+            client = Client()
+            client.force_login(self.staff)
+            response = client.get('/dashboard/todos/', {
+                'date': self.today.isoformat(),
+                'view': 'team',
+                'status': 'completed',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context['pending_tasks']), 1)
+        self.assertEqual(len(response.context['completed_tasks']), 1)
+        self.assertEqual(response.context['status_filter'], 'completed')

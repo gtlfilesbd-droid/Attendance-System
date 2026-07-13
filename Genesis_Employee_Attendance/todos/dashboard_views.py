@@ -53,6 +53,9 @@ def todos_dashboard(request):
     search = request.GET.get('search', '').strip()
     department = request.GET.get('department', '').strip()
     employee_filter = request.GET.get('employee', '').strip()
+    status_filter = request.GET.get('status', 'all').strip()
+    if status_filter not in ('all', 'pending', 'completed'):
+        status_filter = 'all'
     view_mode = request.GET.get('view')
     employee = resolve_employee(request.user)
     permitted = get_permitted_departments(request.user)
@@ -116,6 +119,7 @@ def todos_dashboard(request):
         'search': search,
         'department': department,
         'employee_filter': employee_filter,
+        'status_filter': status_filter,
         'filter_employees': filter_employees,
         'filter_employees_all': filter_employees_all,
         'view_mode': view_mode,

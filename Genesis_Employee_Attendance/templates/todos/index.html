@@ -102,6 +102,11 @@
         color: white;
         border-color: var(--bs-primary);
     }
+    .status-tabs .btn.active {
+        background: var(--bs-primary);
+        color: white;
+        border-color: var(--bs-primary);
+    }
 </style>
 {% endblock %}
 
@@ -167,12 +172,12 @@
 
 <div class="todo-filters">
     <div class="view-tabs btn-group mb-3" role="group">
-        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=team{% if search %}&search={{ search|urlencode }}{% endif %}{% if department %}&department={{ department|urlencode }}{% endif %}{% if employee_filter %}&employee={{ employee_filter|urlencode }}{% endif %}"
+        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=team{% if search %}&search={{ search|urlencode }}{% endif %}{% if department %}&department={{ department|urlencode }}{% endif %}{% if employee_filter %}&employee={{ employee_filter|urlencode }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}"
            class="btn btn-outline-primary {% if view_mode == 'team' %}active{% endif %}">
             Team Tasks
         </a>
         {% if has_employee_profile %}
-        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=mine{% if search %}&search={{ search|urlencode }}{% endif %}"
+        <a href="?date={{ selected_date|date:'Y-m-d' }}&view=mine{% if search %}&search={{ search|urlencode }}{% endif %}{% if status_filter != 'all' %}&status={{ status_filter }}{% endif %}"
            class="btn btn-outline-primary {% if view_mode == 'mine' %}active{% endif %}">
             My Tasks
         </a>
@@ -181,6 +186,7 @@
 
     <form method="get" class="row g-3 align-items-end">
         <input type="hidden" name="view" value="{{ view_mode }}">
+        <input type="hidden" name="status" value="{{ status_filter }}">
         <div class="col-md-2">
             <label class="form-label">Date</label>
             <input type="date" class="form-control" name="date" value="{{ selected_date|date:'Y-m-d' }}"
@@ -270,13 +276,32 @@
 {% endif %}
 
 {% if tasks %}
+<div class="status-tabs btn-group mb-3" id="todo-status-tabs" role="group" data-initial-status="{{ status_filter }}">
+    <button type="button" class="btn btn-outline-secondary btn-sm {% if status_filter == 'all' %}active{% endif %}" data-status="all">
+        All <span class="badge bg-light text-dark ms-1">{{ total_count }}</span>
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm {% if status_filter == 'pending' %}active{% endif %}" data-status="pending">
+        Pending <span class="badge bg-secondary ms-1">{{ pending_count }}</span>
+    </button>
+    <button type="button" class="btn btn-outline-secondary btn-sm {% if status_filter == 'completed' %}active{% endif %}" data-status="completed">
+        Completed <span class="badge bg-success ms-1">{{ completed_count }}</span>
+    </button>
+</div>
+
+<div id="todo-status-empty" class="todo-card text-center text-muted py-4" style="display:none;">
+    <span data-empty="pending">No pending tasks for this filter.</span>
+    <span data-empty="completed" style="display:none;">No completed tasks for this filter.</span>
+</div>
+
+<div id="todo-task-list">
     {% if pending_tasks %}
+    <div class="todo-task-group" data-task-group="pending">
     <div class="section-header">
         <i class="fas fa-circle-notch"></i> Pending
         <span class="badge bg-secondary">{{ pending_count }}</span>
     </div>
     {% for task in pending_tasks %}
-    <div class="todo-card">
+    <div class="todo-card" data-task-status="pending">
         <div class="d-flex align-items-start gap-3">
             {% if view_mode == 'mine' or user.is_superuser %}
             <form method="post" action="{% url 'todos-toggle-complete' task.id %}">
@@ -340,9 +365,11 @@
         {% endif %}
     </div>
     {% endfor %}
+    </div>
     {% endif %}
 
     {% if completed_tasks %}
+    <div class="todo-task-group" data-task-group="completed">
     <div class="section-header">
         <i class="fas fa-check-circle text-success"></i> Completed
         <span class="badge bg-success">{{ completed_count }}</span>
@@ -356,7 +383,7 @@
     <div class="collapse show" id="completed-section">
     {% endif %}
     {% for task in completed_tasks %}
-    <div class="todo-card completed">
+    <div class="todo-card completed" data-task-status="completed">
         <div class="d-flex align-items-start gap-3">
             {% if view_mode == 'mine' or user.is_superuser %}
             <form method="post" action="{% url 'todos-toggle-complete' task.id %}">
@@ -426,7 +453,9 @@
     {% if completed_count > 5 %}
     </div>
     {% endif %}
+    </div>
     {% endif %}
+</div>
 {% else %}
 <div class="todo-card text-center text-muted py-5">
     No tasks found for this date.
@@ -486,4 +515,74 @@
 })();
 </script>
 {% endif %}
+<script>
+(function () {
+    const tabs = document.getElementById('todo-status-tabs');
+    const taskList = document.getElementById('todo-task-list');
+    if (!tabs || !taskList) return;
+
+    const groups = taskList.querySelectorAll('[data-task-group]');
+    const emptyState = document.getElementById('todo-status-empty');
+    const statusInput = document.querySelector('input[name="status"]');
+
+    function applyStatusFilter(status) {
+        if (!['all', 'pending', 'completed'].includes(status)) {
+            status = 'all';
+        }
+
+        tabs.querySelectorAll('[data-status]').forEach(function (btn) {
+            btn.classList.toggle('active', btn.getAttribute('data-status') === status);
+        });
+
+        groups.forEach(function (group) {
+            const groupStatus = group.getAttribute('data-task-group');
+            group.style.display = (status === 'all' || status === groupStatus) ? '' : 'none';
+        });
+
+        var visibleCount = 0;
+        groups.forEach(function (group) {
+            if (group.style.display !== 'none') {
+                visibleCount += group.querySelectorAll('.todo-card[data-task-status]').length;
+            }
+        });
+
+        if (emptyState) {
+            if (visibleCount === 0 && status !== 'all') {
+                emptyState.style.display = '';
+                emptyState.querySelectorAll('[data-empty]').forEach(function (el) {
+                    el.style.display = el.getAttribute('data-empty') === status ? '' : 'none';
+                });
+                taskList.style.display = 'none';
+            } else {
+                emptyState.style.display = 'none';
+                taskList.style.display = '';
+            }
+        }
+
+        if (statusInput) {
+            statusInput.value = status;
+        }
+
+        var params = new URLSearchParams(window.location.search);
+        if (status === 'all') {
+            params.delete('status');
+        } else {
+            params.set('status', status);
+        }
+        var qs = params.toString();
+        var nextUrl = window.location.pathname + (qs ? '?' + qs : '');
+        if (nextUrl !== window.location.pathname + window.location.search) {
+            history.replaceState(null, '', nextUrl);
+        }
+    }
+
+    tabs.addEventListener('click', function (event) {
+        var btn = event.target.closest('[data-status]');
+        if (!btn) return;
+        applyStatusFilter(btn.getAttribute('data-status'));
+    });
+
+    applyStatusFilter(tabs.getAttribute('data-initial-status') || 'all');
+})();
+</script>
 {% endblock %}
