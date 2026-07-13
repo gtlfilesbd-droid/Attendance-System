@@ -4,11 +4,12 @@ Must be imported before admin URLs are loaded.
 """
 from django import forms
 from django.contrib import admin
+from django.contrib.admin.widgets import AutocompleteSelect
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin, GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.forms import UserCreationForm
 from django.contrib.auth.models import User, Group
 from employees.department_permissions import get_permitted_departments
-from employees.models import Employee, UserDepartmentPermission
+from employees.models import DeviceToken, Employee, UserDepartmentPermission
 from .admin_export import AdminExportMixin
 
 
@@ -42,7 +43,7 @@ class UserChangeWithPasswordForm(forms.ModelForm):
         queryset=Employee.objects.none(),
         required=False,
         label='Linked employee',
-        help_text='Select the employee record for this dashboard user (TO-DO My Tasks, etc.). Leave empty to unlink.',
+        help_text='Search by name, employee ID, email, or department. Leave empty to unlink.',
     )
 
     new_password1 = forms.CharField(
@@ -83,7 +84,7 @@ class UserAddWithEmployeeForm(UserCreationForm):
         queryset=Employee.objects.none(),
         required=False,
         label='Linked employee',
-        help_text='Optional: link this new user to an employee from the list.',
+        help_text='Search by name, employee ID, email, or department. Optional when creating a user.',
     )
 
     class Meta(UserCreationForm.Meta):
@@ -142,9 +143,14 @@ class UserAdminWithExport(AdminExportMixin, BaseUserAdmin):
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
-        qs = _employee_queryset_for_request(request)
         if 'linked_employee' in form.base_fields:
-            form.base_fields['linked_employee'].queryset = qs
+            form.base_fields['linked_employee'].queryset = _employee_queryset_for_request(request)
+            # AutocompleteSelect needs a ForeignKey *to* Employee.
+            # Employee.user points to User — using it wrongly shows users in the dropdown.
+            form.base_fields['linked_employee'].widget = AutocompleteSelect(
+                DeviceToken._meta.get_field('employee'),
+                self.admin_site,
+            )
             form.base_fields['linked_employee'].label_from_instance = (
                 lambda emp: f'{emp.name} ({emp.employee_id})'
                 + (f' — {emp.department.name}' if emp.department_id else '')
