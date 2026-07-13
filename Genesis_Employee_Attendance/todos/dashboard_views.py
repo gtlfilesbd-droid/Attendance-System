@@ -271,6 +271,7 @@ def todos_report(request):
     start_str = request.GET.get('start_date')
     end_str = request.GET.get('end_date')
     department = request.GET.get('department', '').strip()
+    employee_filter = request.GET.get('employee', '').strip()
 
     try:
         start_date = datetime.strptime(start_str, '%Y-%m-%d').date() if start_str else today
@@ -289,6 +290,10 @@ def todos_report(request):
     ).select_related('employee', 'employee__department')
     if department:
         queryset = queryset.filter(employee__department__name=department)
+    if employee_filter:
+        filterable = _employees_for_team_filter(request, department)
+        if filterable.filter(pk=employee_filter).exists():
+            queryset = queryset.filter(employee_id=employee_filter)
 
     summary = queryset.aggregate(
         total=Count('id'),
@@ -318,11 +323,26 @@ def todos_report(request):
     if not request.user.is_superuser:
         departments = departments.filter(id__in=permitted.values_list('id', flat=True))
 
+    filter_employees = list(_employees_for_team_filter(request, department))
+    filter_employees_all = [
+        {
+            'id': str(emp.id),
+            'name': emp.name,
+            'employee_id': emp.employee_id,
+            'is_active': emp.is_active,
+            'department': emp.department.name if emp.department_id else '',
+        }
+        for emp in _employees_for_team_filter(request, '')
+    ]
+
     return render(request, 'todos/report.html', {
         'today': today,
         'start_date': start_date,
         'end_date': end_date,
         'department': department,
+        'employee_filter': employee_filter,
+        'filter_employees': filter_employees,
+        'filter_employees_all': filter_employees_all,
         'departments': departments,
         'summary': summary,
         'by_department': by_department,
