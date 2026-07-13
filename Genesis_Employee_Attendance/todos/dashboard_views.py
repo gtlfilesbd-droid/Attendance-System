@@ -143,9 +143,11 @@ def todos_add_task(request):
     if not _require_staff(request.user):
         return HttpResponseForbidden('Staff access required.')
 
-    employee = resolve_employee(request.user)
-    employee_id = request.POST.get('employee_id')
-    if not employee and employee_id and request.user.is_staff:
+    employee_id = (request.POST.get('employee_id') or '').strip()
+    team_add = bool(employee_id) or request.POST.get('add_for_team') == '1'
+
+    employee = None
+    if employee_id and request.user.is_staff:
         try:
             employee = Employee.objects.get(pk=employee_id, is_active=True)
             permitted = get_permitted_departments(request.user)
@@ -154,10 +156,12 @@ def todos_add_task(request):
                     return HttpResponseForbidden('Not permitted for this employee.')
         except Employee.DoesNotExist:
             return redirect('todos-dashboard')
+    elif not team_add:
+        employee = resolve_employee(request.user)
 
     if not employee:
         return redirect('todos-dashboard?link_required=1')
-    if not employee_can_edit(employee):
+    if not team_add and not employee_can_edit(employee):
         return redirect('todos-dashboard')
 
     description = (request.POST.get('description') or '').strip()
@@ -167,7 +171,7 @@ def todos_add_task(request):
     except ValueError:
         task_date = timezone.localdate()
 
-    view_mode = 'mine' if resolve_employee(request.user) else 'team'
+    view_mode = 'team' if team_add else ('mine' if resolve_employee(request.user) else 'team')
     if description:
         try:
             validate_task_date_for_create(task_date)

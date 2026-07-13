@@ -248,6 +248,7 @@
     <form method="post" action="{% url 'todos-add-task' %}">
         {% csrf_token %}
         <input type="hidden" name="task_date" value="{{ selected_date|date:'Y-m-d' }}">
+        <input type="hidden" name="add_for_team" value="1">
         <div class="row g-2">
             <div class="col-md-3">
                 <select class="form-select" name="employee_id" required>
