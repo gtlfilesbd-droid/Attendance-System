@@ -135,37 +135,106 @@ class _TodoDetailScreenState extends State<TodoDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  children: [
-                    Checkbox(
-                      value: _task.isCompleted,
-                      onChanged: (value) {
-                        if (value != null) _toggleComplete(value);
-                      },
-                      shape: const CircleBorder(),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _task.isCompleted ? 'Completed' : 'Not complete yet',
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                              color: _task.isCompleted ? Colors.green.shade700 : colorScheme.onSurfaceVariant,
+              clipBehavior: Clip.antiAlias,
+              child: Ink(
+                decoration: _task.isCompleted
+                    ? const BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            Color(0xFFD1FAE5),
+                            Color(0xFFECFDF5),
+                            Color(0xFFFFFFFF),
+                          ],
+                          stops: [0.0, 0.4, 1.0],
+                        ),
+                      )
+                    : null,
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_task.isCompleted)
+                        Container(
+                          width: 4,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Color(0xFF047857), Color(0xFF059669)],
                             ),
                           ),
-                          if (_task.isCompleted && completedLabel != null)
-                            Text(
-                              'Completed at: $completedLabel',
-                              style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                            ),
-                        ],
+                        ),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: _task.isCompleted,
+                                onChanged: (value) {
+                                  if (value != null) _toggleComplete(value);
+                                },
+                                shape: const CircleBorder(),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (_task.isCompleted)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          gradient: const LinearGradient(
+                                            colors: [
+                                              Color(0xFF059669),
+                                              Color(0xFF047857),
+                                            ],
+                                          ),
+                                          borderRadius: BorderRadius.circular(999),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(
+                                              Icons.check_circle,
+                                              size: 14,
+                                              color: Colors.white,
+                                            ),
+                                            const SizedBox(width: 5),
+                                            Text(
+                                              completedLabel != null
+                                                  ? 'Completed · $completedLabel'
+                                                  : 'Completed',
+                                              style: theme.textTheme.bodySmall?.copyWith(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    else
+                                      Text(
+                                        'Not complete yet',
+                                        style: theme.textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

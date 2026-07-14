@@ -297,13 +297,24 @@ class _TodoListScreenState extends State<TodoListScreen> {
 
   Widget _buildTaskCard(TodoTask task, ThemeData theme, ColorScheme colorScheme) {
     final completedLabel = _formatCompletedAt(task.completedAt);
+    const successRailStart = Color(0xFF047857);
+    const successRailEnd = Color(0xFF059669);
+    const gradientStart = Color(0xFFD1FAE5);
+    const gradientMid = Color(0xFFECFDF5);
+    const gradientEnd = Color(0xFFFFFFFF);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      color: task.isCompleted ? colorScheme.surfaceContainerHighest.withValues(alpha: 0.4) : null,
+      clipBehavior: Clip.antiAlias,
+      color: colorScheme.surface,
+      elevation: task.isCompleted ? 0 : null,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4)),
+        side: BorderSide(
+          color: task.isCompleted
+              ? const Color(0xFF6EE7B7).withValues(alpha: 0.7)
+              : colorScheme.outlineVariant.withValues(alpha: 0.4),
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -314,95 +325,173 @@ class _TodoListScreenState extends State<TodoListScreen> {
           );
           if (mounted) _fetchTasks();
         },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Checkbox(
-                value: task.isCompleted,
-                onChanged: (_) => _toggleComplete(task),
-                shape: const CircleBorder(),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              task.title,
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: task.isCompleted ? colorScheme.onSurfaceVariant : null,
-                              ),
-                            ),
-                          ),
-                          if (_historyMode)
-                            Text(
-                              task.taskDate,
-                              style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                            ),
-                        ],
+        child: Ink(
+          decoration: task.isCompleted
+              ? const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [gradientStart, gradientMid, gradientEnd],
+                    stops: [0.0, 0.35, 1.0],
+                  ),
+                )
+              : null,
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (task.isCompleted)
+                  Container(
+                    width: 4,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [successRailStart, successRailEnd],
                       ),
-                      if (task.assignerDisplay != null && task.assignerDisplay!.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '${task.assignerDisplay} assigned this task',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Checkbox(
+                          value: task.isCompleted,
+                          onChanged: (_) => _toggleComplete(task),
+                          shape: const CircleBorder(),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        task.title,
+                                        style: theme.textTheme.titleMedium?.copyWith(
+                                          fontWeight: FontWeight.w700,
+                                          color: task.isCompleted
+                                              ? const Color(0xFF064E3B)
+                                              : null,
+                                        ),
+                                      ),
+                                    ),
+                                    if (_historyMode)
+                                      Text(
+                                        task.taskDate,
+                                        style: theme.textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                if (task.assignerDisplay != null &&
+                                    task.assignerDisplay!.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${task.assignerDisplay} assigned this task',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: task.isCompleted
+                                          ? const Color(0xFF047857)
+                                          : colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 4),
+                                Text(
+                                  task.description,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: task.isCompleted
+                                        ? const Color(0xFF065F46)
+                                        : null,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                if (task.isCompleted)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          Color(0xFF059669),
+                                          Color(0xFF047857),
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.check_circle,
+                                          size: 14,
+                                          color: Colors.white,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          completedLabel != null
+                                              ? 'Completed · $completedLabel'
+                                              : 'Completed',
+                                          style: theme.textTheme.bodySmall?.copyWith(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else if (task.isPending)
+                                  Text(
+                                    'Not complete yet',
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
+                        if (task.canEdit)
+                          IconButton(
+                            tooltip: 'Edit',
+                            onPressed: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => TodoFormScreen(
+                                    taskId: task.id,
+                                    initialDescription: task.description,
+                                  ),
+                                ),
+                              );
+                              if (mounted) _fetchTasks();
+                            },
+                            icon: const Icon(Icons.edit_outlined, size: 20),
+                          ),
+                        if (task.canDelete)
+                          IconButton(
+                            tooltip: 'Delete',
+                            onPressed: () => _confirmDelete(task),
+                            icon: Icon(
+                              Icons.delete_outline,
+                              color: colorScheme.error,
+                              size: 20,
+                            ),
+                          ),
                       ],
-                      const SizedBox(height: 4),
-                      Text(
-                        task.description,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: task.isCompleted ? colorScheme.onSurfaceVariant : null,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      if (task.isCompleted && completedLabel != null)
-                        Text(
-                          'Completed $completedLabel',
-                          style: theme.textTheme.bodySmall?.copyWith(color: Colors.green.shade700),
-                        )
-                      else if (task.isPending)
-                        Text(
-                          'Not complete yet',
-                          style: theme.textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                        ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              if (task.canEdit)
-                IconButton(
-                  tooltip: 'Edit',
-                  onPressed: () async {
-                    await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => TodoFormScreen(
-                          taskId: task.id,
-                          initialDescription: task.description,
-                        ),
-                      ),
-                    );
-                    if (mounted) _fetchTasks();
-                  },
-                  icon: const Icon(Icons.edit_outlined, size: 20),
-                ),
-              if (task.canDelete)
-                IconButton(
-                  tooltip: 'Delete',
-                  onPressed: () => _confirmDelete(task),
-                  icon: Icon(Icons.delete_outline, color: colorScheme.error, size: 20),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
