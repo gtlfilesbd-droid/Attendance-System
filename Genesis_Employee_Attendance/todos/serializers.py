@@ -2,8 +2,7 @@ from rest_framework import serializers
 
 from employees.models import Employee
 from .models import EmployeeTodoPermission, TodoTask
-from .permissions import resolve_employee
-from .utils import employee_can_delete, employee_can_edit, validate_task_date_for_create
+from .utils import user_can_delete_task, user_can_edit_task, validate_task_date_for_create
 
 
 class TodoTaskSerializer(serializers.ModelSerializer):
@@ -53,25 +52,13 @@ class TodoTaskSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         if not request:
             return True
-        user = request.user
-        employee = user if isinstance(user, Employee) else resolve_employee(user)
-        if employee and employee.id == obj.employee_id:
-            return employee_can_edit(employee)
-        if getattr(user, 'is_staff', False):
-            return True
-        return False
+        return user_can_edit_task(request.user, obj, channel='app')
 
     def get_can_delete(self, obj):
         request = self.context.get('request')
         if not request:
             return True
-        user = request.user
-        employee = user if isinstance(user, Employee) else resolve_employee(user)
-        if employee and employee.id == obj.employee_id:
-            return employee_can_delete(employee)
-        if getattr(user, 'is_staff', False):
-            return True
-        return False
+        return user_can_delete_task(request.user, obj, channel='app')
 
 
 class TodoTaskCreateSerializer(serializers.Serializer):
@@ -101,6 +88,16 @@ class TodoTaskCompleteSerializer(serializers.Serializer):
     is_completed = serializers.BooleanField()
 
 
+PERMISSION_FLAG_FIELDS = (
+    'can_edit_my_app',
+    'can_delete_my_app',
+    'can_edit_my_web',
+    'can_delete_my_web',
+    'can_edit_assigned_web',
+    'can_delete_assigned_web',
+)
+
+
 class EmployeeTodoPermissionSerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source='employee.name', read_only=True)
     employee_id_display = serializers.CharField(source='employee.employee_id', read_only=True)
@@ -109,6 +106,7 @@ class EmployeeTodoPermissionSerializer(serializers.ModelSerializer):
         model = EmployeeTodoPermission
         fields = [
             'id', 'employee', 'employee_name', 'employee_id_display',
-            'can_edit', 'can_delete', 'created_at', 'updated_at',
+            *PERMISSION_FLAG_FIELDS,
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'employee_name', 'employee_id_display']

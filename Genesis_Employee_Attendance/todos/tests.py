@@ -147,8 +147,8 @@ class TodoAPITest(TestCase):
     def test_edit_permission_blocks_create(self):
         EmployeeTodoPermission.objects.create(
             employee=self.employee,
-            can_edit=False,
-            can_delete=True,
+            can_edit_my_app=False,
+            can_delete_my_app=True,
         )
         create = self.client.post('/api/todos/tasks/', {
             'description': 'Locked edit',
@@ -269,6 +269,8 @@ class TodoDashboardAssignTest(TestCase):
         self.assertEqual(item['assigner_display'], f'{self.assigner.name} ({self.assigner.employee_id})')
         self.assertIn('assigned a task for', item['assignment_label'])
         self.assertIn(self.assignee.name, item['assignment_label'])
+        self.assertFalse(item['can_edit'])
+        self.assertFalse(item['can_delete'])
 
     def test_self_created_task_has_no_assigner(self):
         response = _auth_client(self.assignee).post('/api/todos/tasks/', {
@@ -341,3 +343,118 @@ class TodoDashboardStatusFilterTest(TestCase):
         self.assertEqual(len(response.context['pending_tasks']), 1)
         self.assertEqual(len(response.context['completed_tasks']), 1)
         self.assertEqual(response.context['status_filter'], 'completed')
+
+
+class TodoSplitPermissionTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='IT')
+        self.assignee = _create_employee(
+            employee_id='EMP-A', email='assignee@test.com', department=self.department,
+        )
+        self.assigner = _create_employee(
+            employee_id='EMP-B', email='assigner@test.com', department=self.department,
+        )
+        self.assigner.name = 'Assigner'
+        self.assigner.save(update_fields=['name'])
+        self.staff = User.objects.create_user(username='assigner-staff', password='pass', is_staff=True)
+        self.assigner.user = self.staff
+        self.assigner.save(update_fields=['user'])
+        perm = UserDepartmentPermission.objects.create(user=self.staff)
+        perm.departments.add(self.department)
+        self.today = timezone.localdate()
+        self.assigned_task = TodoTask.objects.create(
+            employee=self.assignee,
+            assigned_by=self.assigner,
+            title='Task-01',
+            description='Assigned',
+            task_date=self.today,
+            sort_order=1,
+        )
+        self.self_task = TodoTask.objects.create(
+            employee=self.assignee,
+            title='Task-02',
+            description='Own task',
+            task_date=self.today,
+            sort_order=2,
+        )
+
+    def test_assignee_cannot_edit_or_delete_assigned_task_via_api(self):
+        client = _auth_client(self.assignee)
+        patch = client.patch(
+            f'/api/todos/tasks/{self.assigned_task.id}/',
+            {'description': 'Hacked'},
+            format='json',
+        )
+        self.assertEqual(patch.status_code, status.HTTP_403_FORBIDDEN)
+        delete = client.delete(f'/api/todos/tasks/{self.assigned_task.id}/')
+        self.assertEqual(delete.status_code, status.HTTP_403_FORBIDDEN)
+        complete = client.patch(
+            f'/api/todos/tasks/{self.assigned_task.id}/complete/',
+            {'is_completed': True},
+            format='json',
+        )
+        self.assertEqual(complete.status_code, status.HTTP_200_OK)
+        self.assertTrue(complete.data['data']['is_completed'])
+
+    def test_self_task_respects_my_app_edit_flag(self):
+        EmployeeTodoPermission.objects.create(
+            employee=self.assignee,
+            can_edit_my_app=False,
+            can_delete_my_app=True,
+        )
+        client = _auth_client(self.assignee)
+        patch = client.patch(
+            f'/api/todos/tasks/{self.self_task.id}/',
+            {'description': 'Nope'},
+            format='json',
+        )
+        self.assertEqual(patch.status_code, status.HTTP_403_FORBIDDEN)
+        create = client.post('/api/todos/tasks/', {
+            'description': 'New',
+            'task_date': self.today.isoformat(),
+        }, format='json')
+        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_assigner_web_edit_respects_assigned_web_flag(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_update_task
+
+        EmployeeTodoPermission.objects.create(
+            employee=self.assigner,
+            can_edit_assigned_web=False,
+            can_delete_assigned_web=True,
+        )
+        rf = RequestFactory()
+        denied = rf.post(f'/dashboard/todos/{self.assigned_task.id}/edit/', {
+            'description': 'Updated',
+            'next': '/dashboard/todos/',
+        })
+        denied.user = self.staff
+        resp = todos_update_task(denied, self.assigned_task.id)
+        self.assertEqual(resp.status_code, 403)
+
+        EmployeeTodoPermission.objects.filter(employee=self.assigner).update(can_edit_assigned_web=True)
+        allowed = rf.post(f'/dashboard/todos/{self.assigned_task.id}/edit/', {
+            'description': 'Updated by assigner',
+            'next': '/dashboard/todos/',
+        })
+        allowed.user = self.staff
+        resp2 = todos_update_task(allowed, self.assigned_task.id)
+        self.assertEqual(resp2.status_code, 302)
+        self.assigned_task.refresh_from_db()
+        self.assertEqual(self.assigned_task.description, 'Updated by assigner')
+
+    def test_non_assigner_staff_cannot_edit_assigned_task(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_update_task
+
+        other = User.objects.create_user(username='other-staff', password='pass', is_staff=True)
+        UserDepartmentPermission.objects.create(user=other).departments.add(self.department)
+        rf = RequestFactory()
+        req = rf.post(f'/dashboard/todos/{self.assigned_task.id}/edit/', {
+            'description': 'Intruder',
+            'next': '/dashboard/todos/',
+        })
+        req.user = other
+        resp = todos_update_task(req, self.assigned_task.id)
+        self.assertEqual(resp.status_code, 403)

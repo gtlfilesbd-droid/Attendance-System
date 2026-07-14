@@ -25,9 +25,19 @@ class TodoTaskAdmin(admin.ModelAdmin):
 
 @admin.register(EmployeeTodoPermission)
 class EmployeeTodoPermissionAdmin(admin.ModelAdmin):
-    list_display = ('employee', 'can_edit', 'can_delete', 'updated_at')
+    list_display = (
+        'employee',
+        'can_edit_my_app', 'can_delete_my_app',
+        'can_edit_my_web', 'can_delete_my_web',
+        'can_edit_assigned_web', 'can_delete_assigned_web',
+        'updated_at',
+    )
     search_fields = ('employee__name', 'employee__employee_id')
-    list_filter = ('can_edit', 'can_delete')
+    list_filter = (
+        'can_edit_my_app', 'can_delete_my_app',
+        'can_edit_my_web', 'can_delete_my_web',
+        'can_edit_assigned_web', 'can_delete_assigned_web',
+    )
 
     def get_queryset(self, request):
         qs = super().get_queryset(request).select_related('employee', 'employee__department')

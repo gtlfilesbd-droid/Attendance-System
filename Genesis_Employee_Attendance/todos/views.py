@@ -23,10 +23,11 @@ from .serializers import (
     TodoTaskUpdateSerializer,
 )
 from .utils import (
-    employee_can_delete,
-    employee_can_edit,
+    employee_can_edit_my_app,
     format_task_title,
     get_next_sort_order,
+    user_can_delete_task,
+    user_can_edit_task,
     validate_task_date_for_create,
 )
 
@@ -140,7 +141,7 @@ class TodoTaskViewSet(viewsets.ModelViewSet):
         user = request.user
         if not isinstance(user, Employee):
             return _error('Only employees can create tasks.', status_code=status.HTTP_403_FORBIDDEN)
-        if not employee_can_edit(user):
+        if not employee_can_edit_my_app(user):
             return _error('Edit permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
 
         serializer = TodoTaskCreateSerializer(data=request.data)
@@ -170,11 +171,8 @@ class TodoTaskViewSet(viewsets.ModelViewSet):
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
-        user = request.user
-        employee = user if isinstance(user, Employee) else resolve_employee(user)
-        if employee and instance.employee_id == employee.id:
-            if not employee_can_edit(employee):
-                return _error('Edit permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
+        if not user_can_edit_task(request.user, instance, channel='app'):
+            return _error('Edit permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
 
         serializer = TodoTaskUpdateSerializer(data=request.data, partial=True)
         if not serializer.is_valid():
@@ -190,10 +188,8 @@ class TodoTaskViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        user = request.user
-        if isinstance(user, Employee) and instance.employee_id == user.id:
-            if not employee_can_delete(user):
-                return _error('Delete permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
+        if not user_can_delete_task(request.user, instance, channel='app'):
+            return _error('Delete permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
         instance.delete()
         return _success(message='Task deleted.')
 
@@ -229,7 +225,7 @@ def my_tasks(request):
         return _error('Employee JWT required.', status_code=status.HTTP_403_FORBIDDEN)
 
     queryset = _filter_tasks_queryset(
-        TodoTask.objects.filter(employee=user).select_related('employee', 'employee__department'),
+        TodoTask.objects.filter(employee=user).select_related('employee', 'employee__department', 'assigned_by'),
         request,
     )
     serializer = TodoTaskSerializer(queryset, many=True, context={'request': request})
@@ -342,15 +338,26 @@ class EmployeeTodoPermissionViewSet(viewsets.ModelViewSet):
         obj, _created = EmployeeTodoPermission.objects.update_or_create(
             employee=employee,
             defaults={
-                'can_edit': request.data.get('can_edit', True),
-                'can_delete': request.data.get('can_delete', True),
+                'can_edit_my_app': request.data.get('can_edit_my_app', True),
+                'can_delete_my_app': request.data.get('can_delete_my_app', True),
+                'can_edit_my_web': request.data.get('can_edit_my_web', True),
+                'can_delete_my_web': request.data.get('can_delete_my_web', True),
+                'can_edit_assigned_web': request.data.get('can_edit_assigned_web', True),
+                'can_delete_assigned_web': request.data.get('can_delete_assigned_web', True),
             },
         )
         return _success(self.get_serializer(obj).data, message='Permission saved.')
 
     def partial_update(self, request, *args, **kwargs):
         instance = self.get_object()
-        for field in ('can_edit', 'can_delete'):
+        for field in (
+            'can_edit_my_app',
+            'can_delete_my_app',
+            'can_edit_my_web',
+            'can_delete_my_web',
+            'can_edit_assigned_web',
+            'can_delete_assigned_web',
+        ):
             if field in request.data:
                 setattr(instance, field, bool(request.data[field]))
         instance.save()

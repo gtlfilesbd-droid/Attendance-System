@@ -2,28 +2,339 @@
 
 {% block title %}TO-DO Permissions - Genesis Employee Attendance{% endblock %}
 
-{% block content %}
-<div class="page-header">
-    <h2><i class="fas fa-lock me-2"></i>TO-DO Permissions</h2>
-    <p>Control employee edit/delete permissions</p>
-</div>
+{% block extra_css %}
+<style>
+    .perm-page .page-header {
+        margin-bottom: 1.5rem;
+    }
 
-<div class="card mb-4">
-    <div class="card-body">
+    .perm-toolbar {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        margin-bottom: 1.25rem;
+    }
+
+    .perm-legend {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 0.75rem;
+        margin-bottom: 1.25rem;
+    }
+
+    @media (max-width: 992px) {
+        .perm-legend {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    .perm-legend-item {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 0.9rem 1rem;
+        display: flex;
+        gap: 0.85rem;
+        align-items: flex-start;
+    }
+
+    .perm-legend-icon {
+        width: 36px;
+        height: 36px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+    }
+
+    .perm-legend-icon.app { background: #eff6ff; color: #2563eb; }
+    .perm-legend-icon.web { background: #f0fdf4; color: #059669; }
+    .perm-legend-icon.assign { background: #fff7ed; color: #c2410c; }
+
+    .perm-legend-item h6 {
+        margin: 0 0 0.2rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #0f172a;
+    }
+
+    .perm-legend-item p {
+        margin: 0;
+        font-size: 0.78rem;
+        color: #64748b;
+        line-height: 1.4;
+    }
+
+    .perm-table-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+        overflow: hidden;
+    }
+
+    .perm-table-card .card-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid #e2e8f0;
+        background: #f8fafc;
+    }
+
+    .perm-table-card .card-toolbar h5 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #0f172a;
+    }
+
+    .perm-table-card .card-toolbar .hint {
+        font-size: 0.78rem;
+        color: #64748b;
+    }
+
+    .perm-table {
+        margin: 0;
+        --bs-table-bg: transparent;
+    }
+
+    .perm-table thead th {
+        background: #f8fafc;
+        border-bottom-color: #e2e8f0;
+        color: #475569;
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+        vertical-align: middle;
+        padding: 0.65rem 0.75rem;
+    }
+
+    .perm-table thead tr.group-row th {
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: #0f172a;
+        border-bottom: 1px solid #e2e8f0;
+        text-align: center;
+        padding: 0.75rem;
+    }
+
+    .perm-table thead tr.group-row th.sticky-col,
+    .perm-table thead tr.group-row th:nth-child(2),
+    .perm-table thead tr.group-row th:last-child {
+        text-align: left;
+    }
+
+    .perm-table thead tr.group-row th:last-child {
+        text-align: center;
+    }
+
+    .perm-table tbody td {
+        padding: 0.85rem 0.75rem;
+        vertical-align: middle;
+        border-color: #f1f5f9;
+        font-size: 0.875rem;
+    }
+
+    .perm-table tbody tr:hover {
+        background: #f8fafc;
+    }
+
+    .perm-table .sticky-col {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #fff;
+        min-width: 200px;
+    }
+
+    .perm-table thead .sticky-col {
+        z-index: 3;
+        background: #f8fafc;
+    }
+
+    .perm-table tbody tr:hover .sticky-col {
+        background: #f8fafc;
+    }
+
+    .perm-col-app { background: rgba(37, 99, 235, 0.03); }
+    .perm-col-web { background: rgba(16, 185, 129, 0.04); }
+    .perm-col-assign { background: rgba(194, 65, 12, 0.04); }
+
+    .perm-table thead .perm-col-app { background: #eff6ff; }
+    .perm-table thead .perm-col-web { background: #ecfdf5; }
+    .perm-table thead .perm-col-assign { background: #fff7ed; }
+
+    .perm-emp-name {
+        font-weight: 600;
+        color: #0f172a;
+        display: block;
+        line-height: 1.3;
+    }
+
+    .perm-emp-meta {
+        font-size: 0.75rem;
+        color: #94a3b8;
+    }
+
+    .perm-dept-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.2rem 0.55rem;
+        border-radius: 6px;
+        background: #f1f5f9;
+        color: #475569;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+
+    .perm-group-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        justify-content: center;
+    }
+
+    .perm-col-label {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    .perm-col-label .form-check-input {
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .perm-switch {
+        display: flex;
+        justify-content: center;
+        margin: 0;
+        min-height: auto;
+        padding: 0;
+    }
+
+    .perm-switch .form-check-input {
+        width: 2.4em;
+        height: 1.25em;
+        cursor: pointer;
+        margin: 0;
+    }
+
+    .perm-switch .form-check-input:checked {
+        background-color: var(--primary);
+        border-color: var(--primary);
+    }
+
+    .perm-switch.danger .form-check-input:checked {
+        background-color: #dc2626;
+        border-color: #dc2626;
+    }
+
+    .perm-save-btn {
+        min-width: 72px;
+        font-weight: 500;
+    }
+
+    .perm-row.is-dirty .perm-save-btn {
+        box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
+    }
+
+    .perm-empty {
+        padding: 3rem 1.5rem;
+        text-align: center;
+        color: #64748b;
+    }
+
+    .perm-empty i {
+        font-size: 1.75rem;
+        color: #cbd5e1;
+        margin-bottom: 0.75rem;
+        display: block;
+    }
+
+    .perm-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1.25rem;
+    }
+
+    .perm-footer .note {
+        font-size: 0.8rem;
+        color: #64748b;
+    }
+
+    .perm-forms-host {
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="perm-page">
+    <div class="page-header d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+            <h2><i class="fas fa-user-shield me-2"></i>TO-DO Permissions</h2>
+            <p>Manage who can edit or delete tasks across App, Web, and team assignments</p>
+        </div>
+        <a href="{% url 'todos-dashboard' %}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Back to TO-DO
+        </a>
+    </div>
+
+    <div class="perm-legend">
+        <div class="perm-legend-item">
+            <div class="perm-legend-icon app"><i class="fas fa-mobile-screen-button"></i></div>
+            <div>
+                <h6>My Tasks · App</h6>
+                <p>Controls edit &amp; delete for self-created tasks in the mobile app.</p>
+            </div>
+        </div>
+        <div class="perm-legend-item">
+            <div class="perm-legend-icon web"><i class="fas fa-desktop"></i></div>
+            <div>
+                <h6>My Tasks · Web</h6>
+                <p>Controls edit &amp; delete for self-created tasks on the web dashboard.</p>
+            </div>
+        </div>
+        <div class="perm-legend-item">
+            <div class="perm-legend-icon assign"><i class="fas fa-user-tag"></i></div>
+            <div>
+                <h6>Assign · Web</h6>
+                <p>Controls whether an assigner can edit or delete tasks they assigned (Team view).</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="perm-toolbar">
         <form method="get" class="row g-3 align-items-end">
-            <div class="col-md-3">
-                <label class="form-label">Department</label>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold" for="todo-perm-department-filter">Department</label>
                 <select class="form-select" name="department" id="todo-perm-department-filter">
-                    <option value="">All</option>
+                    <option value="">All departments</option>
                     {% for dept in departments %}
                     <option value="{{ dept.name }}" {% if department == dept.name %}selected{% endif %}>{{ dept.name }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
-                <label class="form-label">Employee</label>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold" for="todo-perm-employee-filter">Employee</label>
                 <select class="form-select" name="employee" id="todo-perm-employee-filter">
-                    <option value="">All</option>
+                    <option value="">All employees</option>
                     {% for emp in filter_employees %}
                     <option value="{{ emp.id }}" {% if employee_filter == emp.id|stringformat:"s" %}selected{% endif %}>
                         {{ emp.name }} ({{ emp.employee_id }})
@@ -33,55 +344,176 @@
             </div>
             {{ filter_employees_all|json_script:"todo-perm-employees-data" }}
             <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100">Filter</button>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="fas fa-filter me-1"></i>Apply
+                </button>
             </div>
+            {% if department or employee_filter %}
+            <div class="col-md-2">
+                <a href="{% url 'todos-permissions' %}" class="btn btn-outline-secondary w-100">Clear</a>
+            </div>
+            {% endif %}
         </form>
     </div>
-</div>
 
-<div class="card">
-    <div class="table-responsive">
-        <table class="table mb-0">
-            <thead>
-                <tr>
-                    <th>Employee</th>
-                    <th>Department</th>
-                    <th>
-                        Can Edit
-                        <input type="checkbox" id="perm-select-all-edit" class="ms-1" title="Toggle all Can Edit">
-                    </th>
-                    <th>
-                        Can Delete
-                        <input type="checkbox" id="perm-select-all-delete" class="ms-1" title="Toggle all Can Delete">
-                    </th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in rows %}
-                <tr>
-                    <form method="post">
-                        {% csrf_token %}
-                        <input type="hidden" name="employee_id" value="{{ row.employee.id }}">
-                        <input type="hidden" name="department" value="{{ department }}">
-                        <input type="hidden" name="employee" value="{{ employee_filter }}">
-                        <td>{{ row.employee.name }} ({{ row.employee.employee_id }})</td>
-                        <td>{{ row.employee.department.name|default:"—" }}</td>
-                        <td><input type="checkbox" name="can_edit" class="perm-can-edit" {% if row.can_edit %}checked{% endif %}></td>
-                        <td><input type="checkbox" name="can_delete" class="perm-can-delete" {% if row.can_delete %}checked{% endif %}></td>
-                        <td><button type="submit" class="btn btn-sm btn-primary">Save</button></td>
-                    </form>
-                </tr>
-                {% empty %}
-                <tr><td colspan="5" class="text-muted">No employees found.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="perm-forms-host">
+        {% for row in rows %}
+        <form method="post" id="perm-form-{{ row.employee.id }}">
+            {% csrf_token %}
+            <input type="hidden" name="employee_id" value="{{ row.employee.id }}">
+            <input type="hidden" name="department" value="{{ department }}">
+            <input type="hidden" name="employee" value="{{ employee_filter }}">
+        </form>
+        {% endfor %}
     </div>
-</div>
 
-<div class="mt-3">
-    <a href="{% url 'todos-dashboard' %}" class="btn btn-outline-secondary">Back to TO-DO</a>
+    <div class="perm-table-card">
+        <div class="card-toolbar">
+            <div>
+                <h5>Employee access matrix</h5>
+                <div class="hint">Toggle permissions per employee, then save the row. Header checkboxes select the whole column.</div>
+            </div>
+            <span class="badge text-bg-light border">{{ rows|length }} employee{{ rows|length|pluralize }}</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table perm-table align-middle mb-0">
+                <thead>
+                    <tr class="group-row">
+                        <th class="sticky-col" rowspan="2">Employee</th>
+                        <th rowspan="2">Department</th>
+                        <th class="perm-col-app" colspan="2">
+                            <span class="perm-group-label">
+                                <i class="fas fa-mobile-screen-button text-primary"></i>
+                                My Tasks · App
+                            </span>
+                        </th>
+                        <th class="perm-col-web" colspan="2">
+                            <span class="perm-group-label">
+                                <i class="fas fa-desktop text-success"></i>
+                                My Tasks · Web
+                            </span>
+                        </th>
+                        <th class="perm-col-assign" colspan="2">
+                            <span class="perm-group-label">
+                                <i class="fas fa-user-tag" style="color:#c2410c;"></i>
+                                Assign · Web
+                            </span>
+                        </th>
+                        <th rowspan="2" class="text-center">Action</th>
+                    </tr>
+                    <tr class="cols-row">
+                        <th class="text-center perm-col-app">
+                            <div class="perm-col-label">
+                                <span>Edit</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-edit-my-app" title="Select all My App Edit">
+                            </div>
+                        </th>
+                        <th class="text-center perm-col-app">
+                            <div class="perm-col-label">
+                                <span>Delete</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-delete-my-app" title="Select all My App Delete">
+                            </div>
+                        </th>
+                        <th class="text-center perm-col-web">
+                            <div class="perm-col-label">
+                                <span>Edit</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-edit-my-web" title="Select all My Web Edit">
+                            </div>
+                        </th>
+                        <th class="text-center perm-col-web">
+                            <div class="perm-col-label">
+                                <span>Delete</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-delete-my-web" title="Select all My Web Delete">
+                            </div>
+                        </th>
+                        <th class="text-center perm-col-assign">
+                            <div class="perm-col-label">
+                                <span>Edit</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-edit-assigned-web" title="Select all Assign Web Edit">
+                            </div>
+                        </th>
+                        <th class="text-center perm-col-assign">
+                            <div class="perm-col-label">
+                                <span>Delete</span>
+                                <input type="checkbox" class="form-check-input" id="perm-select-all-delete-assigned-web" title="Select all Assign Web Delete">
+                            </div>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr class="perm-row" data-perm-row>
+                        <td class="sticky-col">
+                            <span class="perm-emp-name">{{ row.employee.name }}</span>
+                            <span class="perm-emp-meta">ID {{ row.employee.employee_id }}</span>
+                        </td>
+                        <td>
+                            {% if row.employee.department %}
+                            <span class="perm-dept-badge">{{ row.employee.department.name }}</span>
+                            {% else %}
+                            <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center perm-col-app">
+                            <div class="form-check form-switch perm-switch">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_edit_my_app" class="form-check-input perm-can-edit-my-app" {% if row.can_edit_my_app %}checked{% endif %} aria-label="My App Edit">
+                            </div>
+                        </td>
+                        <td class="text-center perm-col-app">
+                            <div class="form-check form-switch perm-switch danger">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_delete_my_app" class="form-check-input perm-can-delete-my-app" {% if row.can_delete_my_app %}checked{% endif %} aria-label="My App Delete">
+                            </div>
+                        </td>
+                        <td class="text-center perm-col-web">
+                            <div class="form-check form-switch perm-switch">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_edit_my_web" class="form-check-input perm-can-edit-my-web" {% if row.can_edit_my_web %}checked{% endif %} aria-label="My Web Edit">
+                            </div>
+                        </td>
+                        <td class="text-center perm-col-web">
+                            <div class="form-check form-switch perm-switch danger">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_delete_my_web" class="form-check-input perm-can-delete-my-web" {% if row.can_delete_my_web %}checked{% endif %} aria-label="My Web Delete">
+                            </div>
+                        </td>
+                        <td class="text-center perm-col-assign">
+                            <div class="form-check form-switch perm-switch">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_edit_assigned_web" class="form-check-input perm-can-edit-assigned-web" {% if row.can_edit_assigned_web %}checked{% endif %} aria-label="Assign Web Edit">
+                            </div>
+                        </td>
+                        <td class="text-center perm-col-assign">
+                            <div class="form-check form-switch perm-switch danger">
+                                <input type="checkbox" role="switch" form="perm-form-{{ row.employee.id }}" name="can_delete_assigned_web" class="form-check-input perm-can-delete-assigned-web" {% if row.can_delete_assigned_web %}checked{% endif %} aria-label="Assign Web Delete">
+                            </div>
+                        </td>
+                        <td class="text-center">
+                            <button type="submit" form="perm-form-{{ row.employee.id }}" class="btn btn-sm btn-primary perm-save-btn">Save</button>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9">
+                            <div class="perm-empty">
+                                <i class="fas fa-users-slash"></i>
+                                <div class="fw-semibold text-dark mb-1">No employees found</div>
+                                <div>Try a different department or clear the filters.</div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="perm-footer">
+        <p class="note mb-0">
+            <i class="fas fa-info-circle me-1"></i>
+            Assignees can always complete assigned tasks. Edit/delete for assigned work applies only to the assigner on Web Team Tasks.
+        </p>
+        <a href="{% url 'todos-dashboard' %}" class="btn btn-outline-secondary btn-sm">
+            <i class="fas fa-arrow-left me-1"></i>Back to TO-DO
+        </a>
+    </div>
 </div>
 {% endblock %}
 
@@ -109,7 +541,7 @@
         empSelect.innerHTML = '';
         const allOpt = document.createElement('option');
         allOpt.value = '';
-        allOpt.textContent = 'All';
+        allOpt.textContent = 'All employees';
         empSelect.appendChild(allOpt);
 
         filtered.forEach(function (emp) {
@@ -149,6 +581,13 @@
         headerEl.indeterminate = checkedCount > 0 && checkedCount < boxes.length;
     }
 
+    function markDirty(row) {
+        if (!row) return;
+        row.classList.add('is-dirty');
+        const btn = row.querySelector('.perm-save-btn');
+        if (btn) btn.textContent = 'Save*';
+    }
+
     function bindSelectAll(headerId, rowSelector) {
         const headerEl = document.getElementById(headerId);
         if (!headerEl) return;
@@ -156,6 +595,7 @@
         headerEl.addEventListener('change', function () {
             document.querySelectorAll(rowSelector).forEach(function (box) {
                 box.checked = headerEl.checked;
+                markDirty(box.closest('[data-perm-row]'));
             });
             headerEl.indeterminate = false;
         });
@@ -163,14 +603,19 @@
         document.querySelectorAll(rowSelector).forEach(function (box) {
             box.addEventListener('change', function () {
                 syncHeader(headerEl, rowSelector);
+                markDirty(box.closest('[data-perm-row]'));
             });
         });
 
         syncHeader(headerEl, rowSelector);
     }
 
-    bindSelectAll('perm-select-all-edit', '.perm-can-edit');
-    bindSelectAll('perm-select-all-delete', '.perm-can-delete');
+    bindSelectAll('perm-select-all-edit-my-app', '.perm-can-edit-my-app');
+    bindSelectAll('perm-select-all-delete-my-app', '.perm-can-delete-my-app');
+    bindSelectAll('perm-select-all-edit-my-web', '.perm-can-edit-my-web');
+    bindSelectAll('perm-select-all-delete-my-web', '.perm-can-delete-my-web');
+    bindSelectAll('perm-select-all-edit-assigned-web', '.perm-can-edit-assigned-web');
+    bindSelectAll('perm-select-all-delete-assigned-web', '.perm-can-delete-assigned-web');
 })();
 </script>
 {% endblock %}

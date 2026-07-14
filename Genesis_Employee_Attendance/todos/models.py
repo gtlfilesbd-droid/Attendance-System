@@ -65,8 +65,12 @@ class EmployeeTodoPermission(models.Model):
         on_delete=models.CASCADE,
         related_name='todo_permission',
     )
-    can_edit = models.BooleanField(default=True)
-    can_delete = models.BooleanField(default=True)
+    can_edit_my_app = models.BooleanField(default=True)
+    can_delete_my_app = models.BooleanField(default=True)
+    can_edit_my_web = models.BooleanField(default=True)
+    can_delete_my_web = models.BooleanField(default=True)
+    can_edit_assigned_web = models.BooleanField(default=True)
+    can_delete_assigned_web = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

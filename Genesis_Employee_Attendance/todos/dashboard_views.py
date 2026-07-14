@@ -13,10 +13,11 @@ from employees.models import Department, Employee
 from .models import EmployeeTodoPermission, TodoTask
 from .permissions import resolve_employee
 from .utils import (
-    employee_can_delete,
-    employee_can_edit,
+    employee_can_edit_my_web,
     format_task_title,
     get_next_sort_order,
+    user_can_delete_task,
+    user_can_edit_task,
     validate_task_date_for_create,
 )
 from .views import _apply_completion, export_todos_csv as api_export_todos_csv
@@ -81,6 +82,9 @@ def todos_dashboard(request):
         if filterable.filter(pk=employee_filter).exists():
             queryset = queryset.filter(employee_id=employee_filter)
     tasks = list(queryset.order_by('employee__name', 'sort_order'))
+    for task in tasks:
+        task.can_edit_web = user_can_edit_task(request.user, task, channel='web')
+        task.can_delete_web = user_can_delete_task(request.user, task, channel='web')
     pending_tasks = [t for t in tasks if not t.is_completed]
     completed_tasks = [t for t in tasks if t.is_completed]
     pending_count = len(pending_tasks)
@@ -91,7 +95,7 @@ def todos_dashboard(request):
     if not request.user.is_superuser:
         departments = departments.filter(id__in=permitted.values_list('id', flat=True))
 
-    can_add = bool(employee) and employee_can_edit(employee)
+    can_add = bool(employee) and employee_can_edit_my_web(employee)
     can_edit = can_add
     addable_employees = []
     if view_mode == 'team' and request.user.is_staff:
@@ -166,7 +170,7 @@ def todos_add_task(request):
 
     if not employee:
         return redirect('todos-dashboard?link_required=1')
-    if not team_add and not employee_can_edit(employee):
+    if not team_add and not employee_can_edit_my_web(employee):
         return redirect('todos-dashboard')
 
     description = (request.POST.get('description') or '').strip()
@@ -208,17 +212,8 @@ def todos_update_task(request, task_id):
         return HttpResponseForbidden('Staff access required.')
 
     task = get_object_or_404(TodoTask, pk=task_id)
-    user = request.user
-    employee = resolve_employee(user)
-
-    if not user.is_superuser:
-        if employee and task.employee_id == employee.id:
-            if not employee_can_edit(employee):
-                return redirect('todos-dashboard')
-        else:
-            permitted = get_permitted_departments(user)
-            if not permitted.filter(pk=task.employee.department_id).exists():
-                return HttpResponseForbidden('Not permitted.')
+    if not user_can_edit_task(request.user, task, channel='web'):
+        return HttpResponseForbidden('Not permitted.')
 
     description = (request.POST.get('description') or '').strip()
     if description:
@@ -234,19 +229,9 @@ def todos_delete_task(request, task_id):
         return HttpResponseForbidden('Staff access required.')
 
     task = get_object_or_404(TodoTask, pk=task_id)
-    user = request.user
-    employee = resolve_employee(user)
     task_date = task.task_date.isoformat()
-
-    if employee and task.employee_id == employee.id:
-        if not employee_can_delete(employee):
-            return redirect('todos-dashboard')
-    elif not user.is_superuser:
-        permitted = get_permitted_departments(user)
-        if not permitted.filter(pk=task.employee.department_id).exists():
-            return HttpResponseForbidden('Not permitted.')
-    else:
-        pass
+    if not user_can_delete_task(request.user, task, channel='web'):
+        return HttpResponseForbidden('Not permitted.')
 
     task.delete()
     return redirect(request.POST.get('next', f'/dashboard/todos/?date={task_date}'))
@@ -421,8 +406,12 @@ def todos_permissions(request):
         EmployeeTodoPermission.objects.update_or_create(
             employee=emp,
             defaults={
-                'can_edit': request.POST.get('can_edit') == 'on',
-                'can_delete': request.POST.get('can_delete') == 'on',
+                'can_edit_my_app': request.POST.get('can_edit_my_app') == 'on',
+                'can_delete_my_app': request.POST.get('can_delete_my_app') == 'on',
+                'can_edit_my_web': request.POST.get('can_edit_my_web') == 'on',
+                'can_delete_my_web': request.POST.get('can_delete_my_web') == 'on',
+                'can_edit_assigned_web': request.POST.get('can_edit_assigned_web') == 'on',
+                'can_delete_assigned_web': request.POST.get('can_delete_assigned_web') == 'on',
             },
         )
         return _permissions_filter_redirect(request)
@@ -443,8 +432,12 @@ def todos_permissions(request):
         perm = permission_map.get(emp.id)
         rows.append({
             'employee': emp,
-            'can_edit': perm.can_edit if perm else True,
-            'can_delete': perm.can_delete if perm else True,
+            'can_edit_my_app': perm.can_edit_my_app if perm else True,
+            'can_delete_my_app': perm.can_delete_my_app if perm else True,
+            'can_edit_my_web': perm.can_edit_my_web if perm else True,
+            'can_delete_my_web': perm.can_delete_my_web if perm else True,
+            'can_edit_assigned_web': perm.can_edit_assigned_web if perm else True,
+            'can_delete_assigned_web': perm.can_delete_assigned_web if perm else True,
         })
 
     departments = Department.objects.filter(is_active=True)
