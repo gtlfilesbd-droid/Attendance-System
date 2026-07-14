@@ -104,8 +104,24 @@ def _is_assigner(user, task) -> bool:
     return False
 
 
+def _assigner_permission_employee(user, task):
+    """Employee whose assigned_web flags apply for the current assigner action."""
+    employee = _actor_employee(user)
+    if employee:
+        return employee
+    assigned_by_id = getattr(task, 'assigned_by_id', None)
+    if assigned_by_id:
+        return Employee.objects.filter(pk=assigned_by_id).first()
+    return None
+
+
+def _superuser_unlinked_bypass(user) -> bool:
+    """Superusers without a linked Employee keep full edit/delete access."""
+    return bool(getattr(user, 'is_superuser', False) and _actor_employee(user) is None)
+
+
 def user_can_edit_task(user, task, *, channel: str) -> bool:
-    if getattr(user, 'is_superuser', False):
+    if _superuser_unlinked_bypass(user):
         return True
 
     employee = _actor_employee(user)
@@ -115,7 +131,10 @@ def user_can_edit_task(user, task, *, channel: str) -> bool:
         if employee and task.employee_id == employee.id:
             return False
         if channel == 'web' and _is_assigner(user, task):
-            return employee_can_edit_assigned_web(employee) if employee else True
+            flag_employee = _assigner_permission_employee(user, task)
+            if flag_employee is None:
+                return True
+            return employee_can_edit_assigned_web(flag_employee)
         return False
 
     if employee and task.employee_id == employee.id:
@@ -127,7 +146,7 @@ def user_can_edit_task(user, task, *, channel: str) -> bool:
 
 
 def user_can_delete_task(user, task, *, channel: str) -> bool:
-    if getattr(user, 'is_superuser', False):
+    if _superuser_unlinked_bypass(user):
         return True
 
     employee = _actor_employee(user)
@@ -137,7 +156,10 @@ def user_can_delete_task(user, task, *, channel: str) -> bool:
         if employee and task.employee_id == employee.id:
             return False
         if channel == 'web' and _is_assigner(user, task):
-            return employee_can_delete_assigned_web(employee) if employee else True
+            flag_employee = _assigner_permission_employee(user, task)
+            if flag_employee is None:
+                return True
+            return employee_can_delete_assigned_web(flag_employee)
         return False
 
     if employee and task.employee_id == employee.id:

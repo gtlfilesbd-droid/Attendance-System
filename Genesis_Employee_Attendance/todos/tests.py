@@ -458,3 +458,69 @@ class TodoSplitPermissionTest(TestCase):
         req.user = other
         resp = todos_update_task(req, self.assigned_task.id)
         self.assertEqual(resp.status_code, 403)
+
+    def test_superuser_without_employee_link_can_edit_web(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_update_task
+
+        superuser = User.objects.create_superuser(
+            username='naked-super', email='naked@test.com', password='pass',
+        )
+        rf = RequestFactory()
+        req = rf.post(f'/dashboard/todos/{self.assigned_task.id}/edit/', {
+            'description': 'Super override',
+            'next': '/dashboard/todos/',
+        })
+        req.user = superuser
+        resp = todos_update_task(req, self.assigned_task.id)
+        self.assertEqual(resp.status_code, 302)
+        self.assigned_task.refresh_from_db()
+        self.assertEqual(self.assigned_task.description, 'Super override')
+
+    def test_superuser_linked_respects_my_web_flag(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_update_task
+
+        EmpTodo = EmployeeTodoPermission
+        EmpTodo.objects.create(
+            employee=self.assigner,
+            can_edit_my_web=False,
+            can_delete_my_web=True,
+        )
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=['is_superuser'])
+        own = TodoTask.objects.create(
+            employee=self.assigner,
+            title='Task-03',
+            description='Assigner own',
+            task_date=self.today,
+            sort_order=3,
+        )
+        rf = RequestFactory()
+        req = rf.post(f'/dashboard/todos/{own.id}/edit/', {
+            'description': 'Should fail',
+            'next': '/dashboard/todos/',
+        })
+        req.user = self.staff
+        resp = todos_update_task(req, own.id)
+        self.assertEqual(resp.status_code, 403)
+
+    def test_superuser_linked_respects_assigned_web_flag(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_update_task
+
+        EmployeeTodoPermission.objects.create(
+            employee=self.assigner,
+            can_edit_assigned_web=False,
+            can_delete_assigned_web=True,
+        )
+        self.staff.is_superuser = True
+        self.staff.save(update_fields=['is_superuser'])
+        rf = RequestFactory()
+        req = rf.post(f'/dashboard/todos/{self.assigned_task.id}/edit/', {
+            'description': 'Should fail',
+            'next': '/dashboard/todos/',
+        })
+        req.user = self.staff
+        resp = todos_update_task(req, self.assigned_task.id)
+        self.assertEqual(resp.status_code, 403)

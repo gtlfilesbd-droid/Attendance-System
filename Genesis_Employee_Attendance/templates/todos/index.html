@@ -59,8 +59,6 @@
 
     .todo-card.completed .task-title {
         color: #64748b;
-        text-decoration: line-through;
-        text-decoration-color: #cbd5e1;
     }
 
     .todo-card.completed .task-desc {
@@ -259,6 +257,10 @@
     You can still add tasks for employees below (Team view).
     {% endif %}
 </div>
+{% elif user.is_superuser %}
+<div class="alert alert-light border">
+    <strong>Permissions:</strong> As a linked employee ({{ employee.name }}), your TO-DO edit/delete actions follow that employee’s permission flags — superuser does not bypass them.
+</div>
 {% endif %}
 
 {% if linked_employee_inactive %}
@@ -377,19 +379,30 @@
         {% csrf_token %}
         <input type="hidden" name="task_date" value="{{ selected_date|date:'Y-m-d' }}">
         <input type="hidden" name="add_for_team" value="1">
+        {{ addable_employees_all|json_script:"todo-assign-employees-data" }}
         <div class="row g-2">
-            <div class="col-md-3">
-                <select class="form-select" name="employee_id" required>
-                    <option value="">Select employee</option>
-                    {% for emp in addable_employees %}
-                    <option value="{{ emp.id }}">{{ emp.name }} ({{ emp.employee_id }})</option>
+            <div class="col-md-2">
+                <select class="form-select" id="todo-assign-department" aria-label="Department">
+                    <option value="">All departments</option>
+                    {% for dept in departments %}
+                    <option value="{{ dept.name }}" {% if department == dept.name %}selected{% endif %}>{{ dept.name }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-3">
+                <select class="form-select" name="employee_id" id="todo-assign-employee" required>
+                    <option value="">Select employee</option>
+                    {% for emp in addable_employees %}
+                    <option value="{{ emp.id }}" {% if employee_filter == emp.id|stringformat:"s" %}selected{% endif %}>
+                        {{ emp.name }} ({{ emp.employee_id }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-5">
                 <textarea class="form-control" name="description" rows="2" placeholder="Task description for the assignee…" required></textarea>
             </div>
-            <div class="col-md-3 d-flex align-items-stretch">
+            <div class="col-md-2 d-flex align-items-stretch">
                 <button type="submit" class="btn btn-primary w-100">
                     <i class="fas fa-paper-plane me-1"></i>Assign
                 </button>
@@ -618,6 +631,52 @@
         allOpt.value = '';
         allOpt.textContent = 'All';
         empSelect.appendChild(allOpt);
+
+        filtered.forEach(function (emp) {
+            const opt = document.createElement('option');
+            opt.value = emp.id;
+            opt.textContent = employeeLabel(emp);
+            empSelect.appendChild(opt);
+        });
+
+        if (preselectId && filtered.some(function (emp) { return emp.id === preselectId; })) {
+            empSelect.value = preselectId;
+        } else {
+            empSelect.value = '';
+        }
+    }
+
+    deptSelect.addEventListener('change', function () {
+        rebuildEmployeeOptions('');
+    });
+
+    rebuildEmployeeOptions(initialEmployee);
+})();
+
+(function () {
+    const deptSelect = document.getElementById('todo-assign-department');
+    const empSelect = document.getElementById('todo-assign-employee');
+    const dataEl = document.getElementById('todo-assign-employees-data');
+    if (!deptSelect || !empSelect || !dataEl) return;
+
+    const allEmployees = JSON.parse(dataEl.textContent);
+    const initialEmployee = '{{ employee_filter|escapejs }}';
+
+    function employeeLabel(emp) {
+        return emp.name + ' (' + emp.employee_id + ')';
+    }
+
+    function rebuildEmployeeOptions(preselectId) {
+        const dept = deptSelect.value;
+        const filtered = dept
+            ? allEmployees.filter(function (emp) { return emp.department === dept; })
+            : allEmployees;
+
+        empSelect.innerHTML = '';
+        const placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = 'Select employee';
+        empSelect.appendChild(placeholder);
 
         filtered.forEach(function (emp) {
             const opt = document.createElement('option');

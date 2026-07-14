@@ -98,13 +98,28 @@ def todos_dashboard(request):
     can_add = bool(employee) and employee_can_edit_my_web(employee)
     can_edit = can_add
     addable_employees = []
+    addable_employees_all = []
     if view_mode == 'team' and request.user.is_staff:
         addable_employees = list(
             Employee.objects.filter(is_active=True, department__in=permitted)
             .select_related('department')
             .order_by('name')
         )
-    can_add_for_team = bool(addable_employees)
+        addable_employees_all = [
+            {
+                'id': str(emp.id),
+                'name': emp.name,
+                'employee_id': emp.employee_id,
+                'department': emp.department.name if emp.department_id else '',
+            }
+            for emp in addable_employees
+        ]
+        if department:
+            addable_employees = [
+                emp for emp in addable_employees
+                if emp.department_id and emp.department.name == department
+            ]
+    can_add_for_team = bool(addable_employees_all) if view_mode == 'team' and request.user.is_staff else False
     filter_employees = list(_employees_for_team_filter(request, department))
     filter_employees_all = [
         {
@@ -140,6 +155,7 @@ def todos_dashboard(request):
         'can_edit': can_edit,
         'can_add_for_team': can_add_for_team,
         'addable_employees': addable_employees,
+        'addable_employees_all': addable_employees_all,
         'employee': employee,
         'linked_employee_inactive': bool(employee and not employee.is_active),
     }
