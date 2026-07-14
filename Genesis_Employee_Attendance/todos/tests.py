@@ -144,17 +144,18 @@ class TodoAPITest(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response.data['data']), 1)
 
-    def test_edit_permission_blocks_create(self):
+    def test_edit_permission_still_allows_create(self):
         EmployeeTodoPermission.objects.create(
             employee=self.employee,
             can_edit_my_app=False,
             can_delete_my_app=True,
         )
         create = self.client.post('/api/todos/tasks/', {
-            'description': 'Locked edit',
+            'description': 'Add allowed without edit',
             'task_date': self.today.isoformat(),
         }, format='json')
-        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(create.data['data']['description'], 'Add allowed without edit')
 
     def test_staff_sees_department_tasks_only(self):
         TodoTask.objects.create(
@@ -413,7 +414,35 @@ class TodoSplitPermissionTest(TestCase):
             'description': 'New',
             'task_date': self.today.isoformat(),
         }, format='json')
-        self.assertEqual(create.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(create.status_code, status.HTTP_201_CREATED)
+
+    def test_web_my_task_add_allowed_when_edit_web_false(self):
+        from django.test import RequestFactory
+        from .dashboard_views import todos_add_task, todos_update_task
+
+        EmployeeTodoPermission.objects.create(
+            employee=self.assigner,
+            can_edit_my_web=False,
+            can_delete_my_web=True,
+        )
+        rf = RequestFactory()
+        add_req = rf.post('/dashboard/todos/add/', {
+            'description': 'New my task',
+            'task_date': self.today.isoformat(),
+        })
+        add_req.user = self.staff
+        add_resp = todos_add_task(add_req)
+        self.assertEqual(add_resp.status_code, 302)
+        own = TodoTask.objects.filter(employee=self.assigner, description='New my task').first()
+        self.assertIsNotNone(own)
+
+        deny = rf.post(f'/dashboard/todos/{own.id}/edit/', {
+            'description': 'Should fail',
+            'next': '/dashboard/todos/',
+        })
+        deny.user = self.staff
+        deny_resp = todos_update_task(deny, own.id)
+        self.assertEqual(deny_resp.status_code, 403)
 
     def test_assigner_web_edit_respects_assigned_web_flag(self):
         from django.test import RequestFactory

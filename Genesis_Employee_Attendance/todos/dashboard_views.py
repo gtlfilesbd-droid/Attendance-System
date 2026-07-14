@@ -13,7 +13,6 @@ from employees.models import Department, Employee
 from .models import EmployeeTodoPermission, TodoTask
 from .permissions import resolve_employee
 from .utils import (
-    employee_can_edit_my_web,
     format_task_title,
     get_next_sort_order,
     user_can_delete_task,
@@ -95,7 +94,7 @@ def todos_dashboard(request):
     if not request.user.is_superuser:
         departments = departments.filter(id__in=permitted.values_list('id', flat=True))
 
-    can_add = bool(employee) and employee_can_edit_my_web(employee)
+    can_add = bool(employee)
     can_edit = can_add
     addable_employees = []
     addable_employees_all = []
@@ -186,8 +185,6 @@ def todos_add_task(request):
 
     if not employee:
         return redirect('todos-dashboard?link_required=1')
-    if not team_add and not employee_can_edit_my_web(employee):
-        return redirect('todos-dashboard')
 
     description = (request.POST.get('description') or '').strip()
     date_str = request.POST.get('task_date')

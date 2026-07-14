@@ -23,7 +23,6 @@ from .serializers import (
     TodoTaskUpdateSerializer,
 )
 from .utils import (
-    employee_can_edit_my_app,
     format_task_title,
     get_next_sort_order,
     user_can_delete_task,
@@ -141,8 +140,6 @@ class TodoTaskViewSet(viewsets.ModelViewSet):
         user = request.user
         if not isinstance(user, Employee):
             return _error('Only employees can create tasks.', status_code=status.HTTP_403_FORBIDDEN)
-        if not employee_can_edit_my_app(user):
-            return _error('Edit permission is disabled for your account.', status_code=status.HTTP_403_FORBIDDEN)
 
         serializer = TodoTaskCreateSerializer(data=request.data)
         if not serializer.is_valid():
