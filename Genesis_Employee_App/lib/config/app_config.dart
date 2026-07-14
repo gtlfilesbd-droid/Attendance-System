@@ -82,6 +82,19 @@ class AppConfig {
   /// GPS filter. Must be > 0.
   static const int stationaryThresholdMinutes = 5;
 
+  /// Minimum seconds between GPS stream restarts (stationary ↔ moving).
+  /// Reduces native listener churn / NMEA binder crashes; send timer still
+  /// uploads via cache or getCurrentPosition during the debounce window.
+  static const int bgStreamRestartDebounceSeconds = 60;
+
+  /// After a position-stream error, wait this many seconds before retrying
+  /// getPositionStream. Meanwhile duty tracking uses getCurrentPosition.
+  static const int bgStreamErrorCooldownSeconds = 180;
+
+  /// Consecutive getCurrentPosition failures while stream is unhealthy before
+  /// auto-stopping the background service (UI can restart on next resume).
+  static const int bgFallbackPollFailLimit = 8;
+
   /// How often (in minutes) the background service checks the server for an
   /// active duty session. Lower = faster auto-stop when server ends session;
   /// higher = fewer network requests and less radio wake-up.
@@ -99,5 +112,5 @@ class AppConfig {
   
   // App Configuration
   static const String appName = 'Genesis Employee';
-  static const String appVersion = '2.0.0';
+  static const String appVersion = '3.0.2';
 }

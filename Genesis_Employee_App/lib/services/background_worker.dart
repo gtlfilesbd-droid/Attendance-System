@@ -37,15 +37,23 @@ void callbackDispatcher() {
 @pragma('vm:entry-point')
 class BackgroundWorker {
   static final BackgroundWorker _instance = BackgroundWorker._internal();
-  
+
   factory BackgroundWorker() {
     return _instance;
   }
-  
+
   BackgroundWorker._internal();
 
   static const String notificationChannelId = 'genesis_tracking_channel';
   static const int notificationId = 888;
+
+  /// Prevents double configure() in the same UI process (splash + home).
+  static bool _configuredInThisProcess = false;
+
+  static void _log(String event, [String? detail]) {
+    final suffix = detail == null || detail.isEmpty ? '' : ' | $detail';
+    print('BG_SAFEFIX: $event$suffix');
+  }
 
   Future<void> initialize() async {
     print("BackgroundWorker: Initializing...");
@@ -72,6 +80,23 @@ class BackgroundWorker {
           ?.createNotificationChannel(channel);
     }
 
+    final bool alreadyRunning = await service.isRunning();
+    if (alreadyRunning) {
+      _log('configure_skipped_running');
+      print(
+          'BackgroundWorker: service already running – skipping configure');
+      print("BackgroundWorker: Initialized");
+      return;
+    }
+
+    if (_configuredInThisProcess) {
+      _log('configure_skipped_latch');
+      print(
+          'BackgroundWorker: already configured in this process – skipping configure');
+      print("BackgroundWorker: Initialized");
+      return;
+    }
+
     await service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: onStart,
@@ -88,7 +113,9 @@ class BackgroundWorker {
         onBackground: onIosBackground,
       ),
     );
-    
+    _configuredInThisProcess = true;
+    _log('configure_ok');
+
     print("BackgroundWorker: Initialized");
   }
 
@@ -146,32 +173,97 @@ class BackgroundWorker {
     double? lastSentLat;
     double? lastSentLng;
     DateTime? lastSentTime;
-    // Phase 1: Watchdog – if no location sent for 15 min, stop service (app will restart on resume). Heartbeat removed to reduce battery drain.
+    // Phase 1: Watchdog – if no location sent for 15 min, stop service (app will restart on resume).
     const int watchdogInactiveMinutes = 15;
 
     // Adaptive distanceFilter state
     bool isStationaryMode = false;
     DateTime lastPositionTime = DateTime.now();
+    DateTime? lastStreamRestartAt;
+    bool streamHealthy = true;
+    DateTime? streamCooldownUntil;
+    int consecutiveFallbackFailures = 0;
+    bool streamRestartInFlight = false;
 
-    // Restarts the GPS stream with the given distanceFilter.
-    // Called on service start and whenever stationary/moving mode switches.
-    void restartPositionStream(int filterMeters) {
-      positionSubscription?.cancel();
-      positionSubscription = Geolocator.getPositionStream(
-        locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: filterMeters,
-        ),
-      ).listen((Position position) {
-        cachedPosition = position;
-        lastPositionTime = DateTime.now();
-      }, onError: (e) {
-        print('BackgroundWorker: Position stream error $e');
-      });
+    Future<bool> restartPositionStream(int filterMeters,
+        {bool force = false}) async {
+      if (streamRestartInFlight) {
+        _log('stream_restart_skipped_inflight');
+        return false;
+      }
+      final now = DateTime.now();
+      if (!force &&
+          lastStreamRestartAt != null &&
+          now.difference(lastStreamRestartAt!).inSeconds <
+              AppConfig.bgStreamRestartDebounceSeconds) {
+        _log(
+          'stream_restart_debounced',
+          'wantedFilter=${filterMeters}m',
+        );
+        return false;
+      }
+
+      streamRestartInFlight = true;
+      try {
+        await positionSubscription?.cancel();
+        positionSubscription = null;
+        // Brief gap so native NMEA/fused listeners can finish teardown.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+
+        positionSubscription = Geolocator.getPositionStream(
+          locationSettings: LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: filterMeters,
+          ),
+        ).listen((Position position) {
+          cachedPosition = position;
+          lastPositionTime = DateTime.now();
+          if (!streamHealthy) {
+            streamHealthy = true;
+            streamCooldownUntil = null;
+            consecutiveFallbackFailures = 0;
+            _log('stream_recovered');
+          }
+        }, onError: (Object e, StackTrace st) async {
+          _log('stream_error_count', e.toString());
+          print('BackgroundWorker: Position stream error $e');
+          streamHealthy = false;
+          streamCooldownUntil = DateTime.now().add(
+            const Duration(seconds: AppConfig.bgStreamErrorCooldownSeconds),
+          );
+          _log(
+            'stream_cooldown_entered',
+            '${AppConfig.bgStreamErrorCooldownSeconds}s',
+          );
+          try {
+            await positionSubscription?.cancel();
+          } catch (_) {}
+          positionSubscription = null;
+          // Do not recreate immediately — send loop falls back to getCurrentPosition.
+        }, cancelOnError: false);
+
+        lastStreamRestartAt = DateTime.now();
+        streamHealthy = true;
+        _log('stream_restart_ok', 'filter=${filterMeters}m');
+        return true;
+      } catch (e) {
+        streamHealthy = false;
+        streamCooldownUntil = DateTime.now().add(
+          const Duration(seconds: AppConfig.bgStreamErrorCooldownSeconds),
+        );
+        _log('stream_restart_failed', e.toString());
+        print('BackgroundWorker: Position stream restart failed $e');
+        return false;
+      } finally {
+        streamRestartInFlight = false;
+      }
     }
 
-    service.on('stopService').listen((event) {
-      positionSubscription?.cancel();
+    service.on('stopService').listen((event) async {
+      try {
+        await positionSubscription?.cancel();
+      } catch (_) {}
+      positionSubscription = null;
       sendTimer?.cancel();
       service.stopSelf();
     });
@@ -180,10 +272,11 @@ class BackgroundWorker {
     int cachedBatLevel = 100;
     DateTime? lastBatReadTime;
 
-    // Start position stream in moving mode.
-    restartPositionStream(AppConfig.distanceFilterMovingMeters);
+    // Start position stream in moving mode (force=true so first start ignores debounce).
+    await restartPositionStream(AppConfig.distanceFilterMovingMeters,
+        force: true);
 
-    // Adaptive send: check every 15s; send if displacement >= 30m OR time since last >= interval (15s when moving, 60s when still)
+    // Adaptive send: check every 15s; send if displacement >= 30m OR time since last >= interval
     sendTimer = Timer.periodic(
       const Duration(seconds: checkIntervalSeconds),
       (timer) async {
@@ -203,23 +296,46 @@ class BackgroundWorker {
             service.invoke('stopService');
             return;
           }
+
+          // Recover stream after cooldown if it had failed.
+          if (!streamHealthy &&
+              streamCooldownUntil != null &&
+              !now.isBefore(streamCooldownUntil!)) {
+            _log('stream_cooldown_retry');
+            await restartPositionStream(
+              isStationaryMode
+                  ? AppConfig.distanceFilterStationaryMeters
+                  : AppConfig.distanceFilterMovingMeters,
+              force: true,
+            );
+          }
+
           // Adaptive distanceFilter: switch GPS stream mode based on movement.
           final int minutesSinceLastPosition =
               now.difference(lastPositionTime).inMinutes;
-          if (!isStationaryMode &&
-              minutesSinceLastPosition >=
-                  AppConfig.stationaryThresholdMinutes) {
-            isStationaryMode = true;
-            restartPositionStream(AppConfig.distanceFilterStationaryMeters);
-            print(
-                'BackgroundWorker: Stationary detected – GPS distanceFilter → ${AppConfig.distanceFilterStationaryMeters}m');
-          } else if (isStationaryMode &&
-              minutesSinceLastPosition <
-                  AppConfig.stationaryThresholdMinutes) {
-            isStationaryMode = false;
-            restartPositionStream(AppConfig.distanceFilterMovingMeters);
-            print(
-                'BackgroundWorker: Movement detected – GPS distanceFilter → ${AppConfig.distanceFilterMovingMeters}m');
+          if (streamHealthy) {
+            if (!isStationaryMode &&
+                minutesSinceLastPosition >=
+                    AppConfig.stationaryThresholdMinutes) {
+              final switched = await restartPositionStream(
+                  AppConfig.distanceFilterStationaryMeters);
+              if (switched) {
+                isStationaryMode = true;
+                print(
+                    'BackgroundWorker: Stationary detected – GPS distanceFilter → ${AppConfig.distanceFilterStationaryMeters}m');
+              }
+            } else if (isStationaryMode &&
+                minutesSinceLastPosition <
+                    AppConfig.stationaryThresholdMinutes) {
+              // Hysteresis: leave stationary only when fresh stream positions arrived.
+              final switched = await restartPositionStream(
+                  AppConfig.distanceFilterMovingMeters);
+              if (switched) {
+                isStationaryMode = false;
+                print(
+                    'BackgroundWorker: Movement detected – GPS distanceFilter → ${AppConfig.distanceFilterMovingMeters}m');
+              }
+            }
           }
 
           sessionCheckTickCount++;
@@ -227,18 +343,44 @@ class BackgroundWorker {
             sessionCheckTickCount = 0;
             final bool? hasActive = await ApiService().hasActiveDutySession();
             if (hasActive == false) {
-              print('BackgroundWorker: No active duty session on server – auto-stopping service');
+              print(
+                  'BackgroundWorker: No active duty session on server – auto-stopping service');
               service.invoke('stopService');
               return;
             }
           }
-          Position? position = cachedPosition;
-          position ??= await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-          );
-          // ignore: unnecessary_null_comparison - position can be null if getCurrentPosition failed
-          if (position == null) return;
-          final bool neverSent = lastSentLat == null || lastSentLng == null || lastSentTime == null;
+
+          late final Position position;
+          if (streamHealthy && cachedPosition != null) {
+            position = cachedPosition!;
+          } else {
+            try {
+              position = await Geolocator.getCurrentPosition(
+                desiredAccuracy: LocationAccuracy.high,
+              );
+              consecutiveFallbackFailures = 0;
+              if (!streamHealthy) {
+                _log('fallback_poll_success');
+              }
+            } catch (e) {
+              consecutiveFallbackFailures++;
+              _log(
+                'fallback_poll_fail',
+                '$consecutiveFallbackFailures/${AppConfig.bgFallbackPollFailLimit} $e',
+              );
+              if (consecutiveFallbackFailures >=
+                  AppConfig.bgFallbackPollFailLimit) {
+                _log('service_watchdog_stop', 'fallback_poll_fail_limit');
+                print(
+                    'BackgroundWorker: Too many fallback GPS failures – stopping service');
+                service.invoke('stopService');
+              }
+              return;
+            }
+          }
+
+          final bool neverSent =
+              lastSentLat == null || lastSentLng == null || lastSentTime == null;
           double displacementMeters = double.infinity;
           if (!neverSent && lastSentLat != null && lastSentLng != null) {
             final meters = Geolocator.distanceBetween(
@@ -251,14 +393,14 @@ class BackgroundWorker {
           }
 
           // Phase 5: Battery-aware interval – use longer intervals when battery is low.
-          // Re-read battery at most every 3 minutes to avoid repeated IPC calls.
           if (lastBatReadTime == null ||
               now.difference(lastBatReadTime!).inSeconds >= 180) {
             cachedBatLevel = await battery.batteryLevel;
             lastBatReadTime = now;
           }
           final int batLevel = cachedBatLevel;
-          final bool powerSave = batLevel <= AppConfig.batteryLowThresholdPercent;
+          final bool powerSave =
+              batLevel <= AppConfig.batteryLowThresholdPercent;
           final int intervalWhenDuty = powerSave
               ? AppConfig.locationUpdateIntervalSecondsWhenDutyPowerSave
               : AppConfig.locationUpdateIntervalSecondsWhenDuty;
@@ -266,9 +408,10 @@ class BackgroundWorker {
               ? AppConfig.locationUpdateIntervalSecondsWhenMovingPowerSave
               : AppConfig.locationUpdateIntervalSecondsWhenMoving;
           final double speedMps = position.speed >= 0 ? position.speed : 0.0;
-          final int intervalSeconds = speedMps >= AppConfig.speedThresholdMovingMps
-              ? intervalWhenMoving
-              : intervalWhenDuty;
+          final int intervalSeconds =
+              speedMps >= AppConfig.speedThresholdMovingMps
+                  ? intervalWhenMoving
+                  : intervalWhenDuty;
           final int elapsed = lastSentTime != null
               ? now.difference(lastSentTime!).inSeconds
               : intervalSeconds + 1;
@@ -284,8 +427,6 @@ class BackgroundWorker {
             lastSentLat = position.latitude;
             lastSentLng = position.longitude;
             lastSentTime = now;
-            // Update notification only when location was actually delivered to
-            // the server — avoids notification changes on every timer tick.
             if (actualSent &&
                 service is AndroidServiceInstance &&
                 await service.isForegroundService()) {
@@ -297,16 +438,19 @@ class BackgroundWorker {
             }
           }
 
-          // Phase 1 watchdog: if no location sent for 15 min, stop service (app will restart on resume)
           final lastActivity = lastSentTime;
           if (lastActivity != null &&
-              now.difference(lastActivity).inMinutes >= watchdogInactiveMinutes) {
-            print('BackgroundWorker: No activity for $watchdogInactiveMinutes min – stopping service (watchdog)');
+              now.difference(lastActivity).inMinutes >=
+                  watchdogInactiveMinutes) {
+            _log('service_watchdog_stop', 'inactive_${watchdogInactiveMinutes}m');
+            print(
+                'BackgroundWorker: No activity for $watchdogInactiveMinutes min – stopping service (watchdog)');
             service.invoke('stopService');
             return;
           }
         } catch (e) {
           print('BackgroundWorker: Error getting location $e');
+          _log('send_loop_error', e.toString());
         }
       },
     );
@@ -334,6 +478,7 @@ class BackgroundWorker {
       }
     } catch (e) {
       print("BackgroundWorker: Initial location error $e");
+      _log('initial_position_error', e.toString());
     }
   }
 }
