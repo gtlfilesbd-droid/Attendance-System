@@ -146,6 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadData();
     PushNotificationService().registerFCMToken();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await PushNotificationService.flushPendingDeepLink();
       if (mounted) {
         // Load duty state first; then start or stop tracking based on open session (enterprise: single source of truth from backend)
         await _loadTodayDutyTime();

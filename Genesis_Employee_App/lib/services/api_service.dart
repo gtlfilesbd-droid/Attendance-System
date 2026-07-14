@@ -612,6 +612,23 @@ class ApiService {
     };
   }
 
+  /// GET /todos/tasks/{id}/
+  Future<Map<String, dynamic>?> getTodo(String id) async {
+    try {
+      final response = await _dio.get('${AppConfig.todosEndpoint}$id/');
+      if (response.statusCode == 200 &&
+          response.data is Map &&
+          response.data['success'] == true &&
+          response.data['data'] is Map) {
+        return Map<String, dynamic>.from(response.data['data'] as Map);
+      }
+      return null;
+    } catch (e) {
+      if (kDebugMode) print('API: getTodo error: $e');
+      return null;
+    }
+  }
+
   /// GET /todos/my-tasks/
   Future<List<Map<String, dynamic>>> getMyTodos({
     String? taskDate,

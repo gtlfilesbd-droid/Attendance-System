@@ -553,3 +553,68 @@ class TodoSplitPermissionTest(TestCase):
         req.user = self.staff
         resp = todos_update_task(req, self.assigned_task.id)
         self.assertEqual(resp.status_code, 403)
+
+
+class TodoAssignedNotificationTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='Sales')
+        self.assignee = _create_employee('EMP-A', 'a@test.com', self.department)
+        self.assigner = _create_employee('EMP-B', 'b@test.com', self.department)
+        self.today = timezone.localdate()
+
+    def test_push_skipped_when_not_assignment(self):
+        from .notifications import send_todo_assigned_push
+
+        task = TodoTask.objects.create(
+            employee=self.assignee,
+            title='Task-01',
+            description='Own task',
+            task_date=self.today,
+            sort_order=1,
+        )
+        result = send_todo_assigned_push(task)
+        self.assertEqual(result['status'], 'skipped')
+        self.assertEqual(result['reason'], 'not_an_assignment')
+
+    def test_push_completed_with_zero_tokens(self):
+        from .notifications import send_todo_assigned_push
+
+        task = TodoTask.objects.create(
+            employee=self.assignee,
+            title='Task-01',
+            description='Assigned work',
+            task_date=self.today,
+            sort_order=1,
+            assigned_by=self.assigner,
+        )
+        result = send_todo_assigned_push(task)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(result['tokens_sent'], 0)
+
+    def test_add_task_enqueues_notification_for_team_assign(self):
+        from unittest.mock import patch
+        from django.test import RequestFactory
+        from .dashboard_views import todos_add_task
+
+        staff = User.objects.create_user(username='mgr', password='pass', is_staff=True)
+        self.assigner.user = staff
+        self.assigner.save(update_fields=['user'])
+        perm = UserDepartmentPermission.objects.create(user=staff)
+        perm.departments.add(self.department)
+
+        rf = RequestFactory()
+        req = rf.post('/dashboard/todos/add/', {
+            'employee_id': str(self.assignee.pk),
+            'add_for_team': '1',
+            'description': 'Please do this',
+            'task_date': self.today.isoformat(),
+        })
+        req.user = staff
+
+        with patch('todos.tasks.send_todo_assigned_notification.delay') as delay_mock:
+            resp = todos_add_task(req)
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            TodoTask.objects.filter(employee=self.assignee, description='Please do this').exists()
+        )
+        self.assertTrue(delay_mock.called)

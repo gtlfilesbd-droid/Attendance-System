@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 
@@ -20,6 +21,71 @@ from .utils import (
     validate_task_date_for_create,
 )
 from .views import _apply_completion, export_todos_csv as api_export_todos_csv
+
+logger = logging.getLogger(__name__)
+
+
+def _enqueue_todo_assigned_notification(task):
+    """Fire-and-forget FCM for team assignments. Never affects task save / redirect."""
+    if not (task.assigned_by_id or task.assigned_by_username):
+        logger.info(
+            'todo assigned notification skipped (not an assignment) task_id=%s',
+            task.id,
+        )
+        return
+
+    task_id = str(task.id)
+
+    def _send_in_background():
+        try:
+            from .models import TodoTask
+            from .notifications import send_todo_assigned_push
+
+            fresh = (
+                TodoTask.objects.select_related('employee', 'assigned_by')
+                .filter(pk=task_id)
+                .first()
+            )
+            if not fresh:
+                logger.warning(
+                    'todo assigned sync fallback: task not found id=%s',
+                    task_id,
+                )
+                return
+            result = send_todo_assigned_push(fresh)
+            logger.info(
+                'todo assigned sync fallback finished task_id=%s result=%s',
+                task_id,
+                result,
+            )
+        except Exception:
+            logger.exception(
+                'todo assigned sync fallback failed task_id=%s',
+                task_id,
+            )
+
+    try:
+        from .tasks import send_todo_assigned_notification
+
+        async_result = send_todo_assigned_notification.delay(task_id)
+        logger.info(
+            'todo assigned notification enqueued task_id=%s celery_id=%s',
+            task_id,
+            getattr(async_result, 'id', None),
+        )
+    except Exception:
+        logger.exception(
+            'Failed to enqueue todo assigned notification for task_id=%s; '
+            'falling back to threaded sync send',
+            task_id,
+        )
+        import threading
+
+        threading.Thread(
+            target=_send_in_background,
+            name=f'todo-assigned-fcm-{task_id[:8]}',
+            daemon=True,
+        ).start()
 
 
 def _require_staff(user):
@@ -211,7 +277,9 @@ def todos_add_task(request):
                     create_kwargs['assigned_by'] = assigner
                 elif not assigner:
                     create_kwargs['assigned_by_username'] = request.user.get_username()
-            TodoTask.objects.create(**create_kwargs)
+            task = TodoTask.objects.create(**create_kwargs)
+            if team_add:
+                _enqueue_todo_assigned_notification(task)
         except Exception:
             pass
 

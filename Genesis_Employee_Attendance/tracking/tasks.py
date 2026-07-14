@@ -571,11 +571,17 @@ def send_duty_reminder_notification(message_type):
                     )
                     messaging.send(msg)
                     sent += 1
-                except (messaging.UnregisteredError, messaging.InvalidArgumentError):
+                except (messaging.UnregisteredError,):
                     invalid_tokens.append(token)
                 except Exception as e:
                     logger.warning(f"FCM send failed for token {token[:20]}...: {e}")
-                    if 'not-registered' in str(e).lower() or 'invalid' in str(e).lower():
+                    err = str(e).lower()
+                    if (
+                        'not-registered' in err
+                        or 'unregistered' in err
+                        or 'invalid-argument' in err
+                        or 'registration-token-not-registered' in err
+                    ):
                         invalid_tokens.append(token)
 
             if invalid_tokens:
