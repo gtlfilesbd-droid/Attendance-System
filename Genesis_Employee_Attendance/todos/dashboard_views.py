@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
@@ -372,20 +373,51 @@ def todos_export_csv(request):
     return api_export_todos_csv(request)
 
 
+def _permissions_filter_redirect(request):
+    department = (
+        request.POST.get('department')
+        or request.GET.get('department')
+        or ''
+    ).strip()
+    employee_filter = (
+        request.POST.get('employee')
+        or request.GET.get('employee')
+        or ''
+    ).strip()
+    params = {}
+    if department:
+        params['department'] = department
+    if employee_filter:
+        params['employee'] = employee_filter
+    if params:
+        return redirect(f'/dashboard/todos/permissions/?{urlencode(params)}')
+    return redirect('todos-permissions')
+
+
 @login_required
 def todos_permissions(request):
     if not _require_staff(request.user):
         return HttpResponseForbidden('Staff access required.')
 
     permitted = get_permitted_departments(request.user)
-    employees = Employee.objects.filter(is_active=True, department__in=permitted).select_related('department')
+    department = request.GET.get('department', '').strip()
+    employee_filter = request.GET.get('employee', '').strip()
+    if request.method == 'POST':
+        department = (request.POST.get('department') or department).strip()
+        employee_filter = (request.POST.get('employee') or employee_filter).strip()
+
+    employees = Employee.objects.filter(
+        is_active=True, department__in=permitted
+    ).select_related('department').order_by('name')
 
     if request.method == 'POST':
         employee_id = request.POST.get('employee_id')
         try:
-            emp = employees.get(pk=employee_id)
+            emp = Employee.objects.get(
+                pk=employee_id, is_active=True, department__in=permitted
+            )
         except Employee.DoesNotExist:
-            return redirect('todos-permissions')
+            return _permissions_filter_redirect(request)
         EmployeeTodoPermission.objects.update_or_create(
             employee=emp,
             defaults={
@@ -393,7 +425,14 @@ def todos_permissions(request):
                 'can_delete': request.POST.get('can_delete') == 'on',
             },
         )
-        return redirect('todos-permissions')
+        return _permissions_filter_redirect(request)
+
+    if department:
+        employees = employees.filter(department__name=department)
+    if employee_filter:
+        filterable = _employees_for_team_filter(request, department).filter(is_active=True)
+        if filterable.filter(pk=employee_filter).exists():
+            employees = employees.filter(pk=employee_filter)
 
     permission_map = {
         p.employee_id: p
@@ -408,4 +447,29 @@ def todos_permissions(request):
             'can_delete': perm.can_delete if perm else True,
         })
 
-    return render(request, 'todos/permissions.html', {'rows': rows})
+    departments = Department.objects.filter(is_active=True)
+    if not request.user.is_superuser:
+        departments = departments.filter(id__in=permitted.values_list('id', flat=True))
+
+    filter_employees = list(
+        _employees_for_team_filter(request, department).filter(is_active=True)
+    )
+    filter_employees_all = [
+        {
+            'id': str(emp.id),
+            'name': emp.name,
+            'employee_id': emp.employee_id,
+            'is_active': emp.is_active,
+            'department': emp.department.name if emp.department_id else '',
+        }
+        for emp in _employees_for_team_filter(request, '').filter(is_active=True)
+    ]
+
+    return render(request, 'todos/permissions.html', {
+        'rows': rows,
+        'department': department,
+        'departments': departments,
+        'employee_filter': employee_filter,
+        'filter_employees': filter_employees,
+        'filter_employees_all': filter_employees_all,
+    })
