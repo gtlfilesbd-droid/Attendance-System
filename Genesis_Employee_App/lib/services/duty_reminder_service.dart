@@ -17,7 +17,7 @@ class DutyReminderService {
   Future<void> ensureInitialized() async {
     if (_initialized) return;
     tz_data.initializeTimeZones();
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android = AndroidInitializationSettings('@drawable/ic_bg_service_small');
     const ios = DarwinInitializationSettings();
     await _plugin.initialize(
       const InitializationSettings(android: android, iOS: ios),

@@ -77,7 +77,7 @@ class PushNotificationService {
       await androidPlugin?.createNotificationChannel(todoChannel);
 
       const initSettings = InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+        android: AndroidInitializationSettings('@drawable/ic_bg_service_small'),
       );
       await _localNotifications.initialize(
         initSettings,
@@ -126,7 +126,11 @@ class PushNotificationService {
       notif.title ?? 'Genesis',
       notif.body ?? '',
       NotificationDetails(
-        android: AndroidNotificationDetails(channelId, channelName),
+        android: AndroidNotificationDetails(
+          channelId,
+          channelName,
+          icon: 'ic_bg_service_small',
+        ),
       ),
       payload: taskId,
     );
