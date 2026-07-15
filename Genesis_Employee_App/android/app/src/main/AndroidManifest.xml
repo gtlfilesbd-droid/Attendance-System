@@ -67,6 +67,7 @@
             android:name="flutterEmbedding"
             android:value="2" />
 
+        <!-- Same small icon as Location Tracking FGS (file is in app drawable/). -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
             android:resource="@drawable/ic_bg_service_small" />

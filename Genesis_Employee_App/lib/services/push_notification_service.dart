@@ -121,19 +121,37 @@ class PushNotificationService {
     final channelId = isTodo ? _todoAssignedChannelId : _dutyReminderChannelId;
     final channelName = isTodo ? 'Task Assigned' : 'Duty Reminder';
 
-    await _localNotifications.show(
-      message.hashCode,
-      notif.title ?? 'Genesis',
-      notif.body ?? '',
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          channelId,
-          channelName,
-          icon: 'ic_bg_service_small',
+    Future<void> showBanner({required bool withLargeIcon}) async {
+      await _localNotifications.show(
+        message.hashCode,
+        notif.title ?? 'Genesis',
+        notif.body ?? '',
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            channelId,
+            channelName,
+            // Same small icon as Location Tracking (compact / status).
+            icon: 'ic_bg_service_small',
+            // Same Genesis circle as Tracking when expanded / slid open.
+            largeIcon: withLargeIcon
+                ? const DrawableResourceAndroidBitmap('ic_notification_large')
+                : null,
+          ),
         ),
-      ),
-      payload: taskId,
-    );
+        payload: taskId,
+      );
+    }
+
+    try {
+      await showBanner(withLargeIcon: true);
+    } catch (e) {
+      print('PushNotificationService: show with largeIcon failed: $e');
+      try {
+        await showBanner(withLargeIcon: false);
+      } catch (e2) {
+        print('PushNotificationService: fallback show failed: $e2');
+      }
+    }
   }
 
   static void _onMessageOpened(RemoteMessage message) {
