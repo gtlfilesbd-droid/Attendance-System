@@ -1,0 +1,41 @@
+📦 New Version Available: Genesis v4.0.0.apk
+
+এই আপডেটে Employee অ্যাপে TO-DO Task মডিউল, টিম টাস্ক অ্যাসাইন নোটিফিকেশন, Login-এ Remember Me এবং Dashboard / Profile / TO-DO-এর পেশাদার UI আপডেট যুক্ত করা হয়েছে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🔹 TO-DO Task (Employee App)
+Employee এখন অ্যাপে নিজের Daily Task দেখতে, Complete করতে এবং Manage করতে পারবেন।
+— Today / Tomorrow / Next 7 Days ও History থেকে টাস্ক ফিল্টার করা যাবে।
+— Search এবং All / Pending / Completed ফিল্টার দিয়ে দ্রুত খুঁজে পাওয়া যাবে।
+— Completed টাস্ক সুন্দর Green Design-এ দেখাবে।
+
+🔹 Team Task Assign Notification
+Admin / Team থেকে Web-এ টাস্ক Assign করলে Employee-এর ফোনে Push Notification যাবে।
+— Notification-এ ট্যাপ করলে সরাসরি ওই টাস্কের Detail Page খুলবে।
+— Notification Icon Location Tracking-এর মতো Compact ও Expanded View-তে সঠিকভাবে দেখাবে।
+
+🔹 Remember Me (Login)
+Login পেজে এখন Remember Me অপশন আছে।
+— চেক করে Login করলে পরেরবার Email ও Password আগে থেকেই ভরে থাকবে।
+— Logout করলেও Remember Me তথ্য থাকবে; নিজে Uncheck করে Login করলে মুছে যাবে।
+
+🔹 Professional UI Update
+Login, Dashboard (Home), My Profile এবং TO-DO পেজের Design আরও Professional করা হয়েছে।
+— Dashboard ও Login-এ Genesis Logo ব্যবহার করা হয়েছে।
+— Login ও My Profile-এর নিচে App Version দেখাবে: v4.0.0।
+
+🔹 Background Location Stability
+Duty ON অবস্থায় Background Location Tracking আরও Stable করা হয়েছে।
+— Restart বা GPS সমস্যার কারণে Tracking ভেঙে পড়ার ঝুঁকি কমানো হয়েছে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎥 আপডেট করার নিয়ম:
+
+🔹 Step 1: আগে আপনার মোবাইল থেকে পুরোনো Genesis অ্যাপটি Uninstall করুন।
+🔹 Step 2: তারপর নতুন ভার্সন Genesis v4.0.0.apk Install করুন।
+
+⚠️ সরাসরি নতুন অ্যাপ ইনস্টল করবেন না। আগে পুরোনো অ্যাপটি আনইনস্টল করা বাধ্যতামূলক।
+
+ধন্যবাদ। 🚀
