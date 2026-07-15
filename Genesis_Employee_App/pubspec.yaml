@@ -1,7 +1,7 @@
 name: genesis_employee_app
 description: Genesis Employee Attendance Tracking Mobile Application
 publish_to: 'none'
-version: 3.0.2+5
+version: 4.0.0+6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

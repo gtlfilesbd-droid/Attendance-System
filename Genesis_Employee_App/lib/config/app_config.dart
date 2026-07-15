@@ -112,5 +112,5 @@ class AppConfig {
   
   // App Configuration
   static const String appName = 'Genesis Employee';
-  static const String appVersion = '3.0.2';
+  static const String appVersion = '4.0.0';
 }
