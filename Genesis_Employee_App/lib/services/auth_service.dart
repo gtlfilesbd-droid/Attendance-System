@@ -40,6 +40,19 @@ class AuthService {
   /// Used to detect stale Keystore tokens after Clear Data or reinstall.
   static const String _storageGuardKey = 'storage_guard_v1';
 
+  /// Verified session keys written via AuthService `_storage.write`.
+  /// Does NOT include offline_queue_encryption_key or remembered_password.
+  static const List<String> _sessionSecureKeys = [
+    AppConfig.tokenKey,
+    AppConfig.refreshTokenKey,
+    AppConfig.employeeIdKey,
+    AppConfig.employeeEmailKey,
+    AppConfig.employeeDataKey,
+  ];
+
+  /// Serializes concurrent clearSessionStorage callers. Cleared only in finally.
+  Future<void>? _clearSessionInFlight;
+
   /// Detects and purges stale Keystore tokens left over from a previous install
   /// or after "Clear Data" in App Info on OEMs where Keystore survives the wipe.
   ///
@@ -78,19 +91,119 @@ class AuthService {
         // Fall through to purge.
       }
 
-      // Guard absent OR stale backup-restored guard: purge all token remnants.
+      // Guard absent OR stale backup-restored guard: purge session remnants.
+      await clearSessionStorage(purgeIntegrity: true);
+    } catch (_) {}
+  }
+
+  /// Clears JWT / employee session keys. Preserves Remember Me and offline
+  /// queue encryption key. Concurrent callers share one in-flight Future;
+  /// [_clearSessionInFlight] is always cleared in `finally`.
+  Future<void> clearSessionStorage({required bool purgeIntegrity}) {
+    final existing = _clearSessionInFlight;
+    if (existing != null) {
+      if (!purgeIntegrity) return existing;
+      // First run may have been a normal logout; finish integrity extras after.
+      return existing.then((_) => _finishIntegrityExtrasIfNeeded());
+    }
+
+    late final Future<void> run;
+    run = () async {
       try {
-        await _storage.deleteAll();
+        await _clearSessionStorageBody(purgeIntegrity: purgeIntegrity);
+      } finally {
+        // Must always clear even if body throws — otherwise lock is stuck permanently.
+        if (identical(_clearSessionInFlight, run)) {
+          _clearSessionInFlight = null;
+        }
+      }
+    }();
+
+    _clearSessionInFlight = run;
+    return run;
+  }
+
+  Future<void> _clearSessionStorageBody({required bool purgeIntegrity}) async {
+    for (final key in _sessionSecureKeys) {
+      try {
+        await _storage.delete(key: key);
       } catch (_) {}
-      try {
-        await prefs.remove(_bgTokenKey);
-      } catch (_) {}
-      try {
-        await prefs.remove(_bgRefreshTokenKey);
-      } catch (_) {}
-      try {
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_bgTokenKey);
+      await prefs.remove(_bgRefreshTokenKey);
+      if (purgeIntegrity) {
         await prefs.remove(_storageGuardKey);
-      } catch (_) {}
+        final remember = prefs.getBool(AppConfig.rememberMeKey) == true;
+        if (!remember) {
+          try {
+            await _storage.delete(key: AppConfig.rememberedPasswordKey);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  /// Idempotent extras when a concurrent non-purge clear finished first.
+  Future<void> _finishIntegrityExtrasIfNeeded() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey(_storageGuardKey)) {
+        await prefs.remove(_storageGuardKey);
+      }
+      final remember = prefs.getBool(AppConfig.rememberMeKey) == true;
+      if (!remember) {
+        try {
+          await _storage.delete(key: AppConfig.rememberedPasswordKey);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  /// Loads Remember Me credentials. Null-safe: missing values become empty strings.
+  /// Password is Keystore-backed; client asked to persist it (device compromise risk).
+  Future<({bool rememberMe, String email, String password})> loadRememberedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final remember = prefs.getBool(AppConfig.rememberMeKey) == true;
+      final email = prefs.getString(AppConfig.rememberedEmailKey) ?? '';
+      String password = '';
+      if (remember) {
+        try {
+          password = await _storage.read(key: AppConfig.rememberedPasswordKey) ?? '';
+        } catch (_) {}
+      }
+      return (
+        rememberMe: remember && email.isNotEmpty,
+        email: email,
+        password: password,
+      );
+    } catch (_) {
+      return (rememberMe: false, email: '', password: '');
+    }
+  }
+
+  Future<void> saveRememberedCredentials({
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(AppConfig.rememberMeKey, true);
+      await prefs.setString(AppConfig.rememberedEmailKey, email.trim());
+      await _storage.write(key: AppConfig.rememberedPasswordKey, value: password);
+    } catch (_) {}
+  }
+
+  Future<void> clearRememberedCredentials() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(AppConfig.rememberMeKey);
+      await prefs.remove(AppConfig.rememberedEmailKey);
+    } catch (_) {}
+    try {
+      await _storage.delete(key: AppConfig.rememberedPasswordKey);
     } catch (_) {}
   }
 
@@ -127,7 +240,7 @@ class AuthService {
           }
         } catch (_) {}
         if (employee != null) {
-          await _storage.write(key: 'employee_data', value: jsonEncode(employee));
+          await _storage.write(key: AppConfig.employeeDataKey, value: jsonEncode(employee));
           if (employee['employee_id'] != null) {
             await _storage.write(key: AppConfig.employeeIdKey, value: employee['employee_id']);
           }
@@ -162,18 +275,13 @@ class AuthService {
     } catch (_) {
       // Proceed with local logout even if API call fails (e.g. offline)
     }
-    // Clear secure storage and SharedPreferences token backup
+    // Clear session keys only (preserves Remember Me + offline queue crypto key)
     try {
-      await _storage.deleteAll();
+      await clearSessionStorage(purgeIntegrity: false);
     } catch (_) {
       // Proceed even if secure storage fails (e.g. Keystore issues on some real devices)
     }
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_bgTokenKey);
-      await prefs.remove(_bgRefreshTokenKey);
-    } catch (_) {}
-    
+
     // Stop background location service
     try {
       final service = FlutterBackgroundService();
@@ -219,14 +327,14 @@ class AuthService {
   /// Update stored employee data (e.g. after fetching fresh profile from GET /me/).
   Future<void> saveEmployeeData(Map<String, dynamic> data) async {
     await _storage.write(
-      key: 'employee_data',
+      key: AppConfig.employeeDataKey,
       value: jsonEncode(data),
     );
   }
 
   /// Get stored employee data
   Future<Map<String, dynamic>?> getEmployeeData() async {
-    final data = await _storage.read(key: 'employee_data');
+    final data = await _storage.read(key: AppConfig.employeeDataKey);
     if (data != null) {
       try {
         return jsonDecode(data) as Map<String, dynamic>;

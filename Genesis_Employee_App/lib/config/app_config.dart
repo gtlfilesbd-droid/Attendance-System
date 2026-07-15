@@ -109,7 +109,14 @@ class AppConfig {
   static const String refreshTokenKey = 'refresh_token';
   static const String employeeIdKey = 'employee_id';
   static const String employeeEmailKey = 'employee_email';
-  
+  static const String employeeDataKey = 'employee_data';
+
+  /// Remember-me (prefs / secure). Survives logout; not session JWT keys.
+  /// Password in Keystore is a client requirement — device compromise can expose it.
+  static const String rememberMeKey = 'remember_me';
+  static const String rememberedEmailKey = 'remembered_email';
+  static const String rememberedPasswordKey = 'remembered_password';
+
   // App Configuration
   static const String appName = 'Genesis Employee';
   static const String appVersion = '4.0.0';

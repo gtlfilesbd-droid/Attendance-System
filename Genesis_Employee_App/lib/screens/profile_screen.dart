@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import '../app_navigator.dart';
+import '../config/app_config.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/foreground_refresh_service.dart';
@@ -232,6 +233,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   icon: const Icon(Icons.refresh),
                   label: const Text('Retry'),
                 ),
+                const SizedBox(height: 32),
+                Text(
+                  'v${AppConfig.appVersion}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
               ],
             ),
           ),
@@ -372,6 +380,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 24),
+              Text(
+                'v${AppConfig.appVersion}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
           ),
         ),
