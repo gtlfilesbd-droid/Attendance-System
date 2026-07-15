@@ -293,13 +293,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: colorScheme.outlineVariant.withValues(alpha: 0.6),
-                    width: 2,
+                    color: colorScheme.primary.withValues(alpha: 0.28),
+                    width: 2.5,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 12,
+                      color: colorScheme.primary.withValues(alpha: 0.12),
+                      blurRadius: 16,
                       offset: const Offset(0, 4),
                     ),
                   ],
@@ -324,6 +324,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 name,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
+                  letterSpacing: -0.3,
                   color: colorScheme.onSurface,
                 ),
                 textAlign: TextAlign.center,
@@ -400,25 +401,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.4)),
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.35)),
       ),
       color: colorScheme.surface,
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Icon(icon, color: colorScheme.primary, size: 24),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        leading: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: colorScheme.primary.withValues(alpha: 0.10),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: colorScheme.primary, size: 22),
+        ),
         title: Text(
           label,
           style: theme.textTheme.bodySmall?.copyWith(
             color: colorScheme.onSurfaceVariant,
             fontSize: 12,
+            fontWeight: FontWeight.w500,
           ),
         ),
         subtitle: Text(
           value,
           style: theme.textTheme.bodyLarge?.copyWith(
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
             color: colorScheme.onSurface,
           ),
         ),

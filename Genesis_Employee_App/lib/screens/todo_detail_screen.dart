@@ -94,8 +94,10 @@ class _TodoDetailScreenState extends State<TodoDetailScreen> {
     final completedLabel = _formatCompletedAt(_task.completedAt);
 
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: Text(_task.title),
+        elevation: 0,
         actions: [
           if (_task.canEdit)
             IconButton(
@@ -135,7 +137,17 @@ class _TodoDetailScreenState extends State<TodoDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Card(
+              elevation: 0,
+              color: colorScheme.surface,
               clipBehavior: Clip.antiAlias,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: _task.isCompleted
+                      ? const Color(0xFF6EE7B7).withValues(alpha: 0.7)
+                      : colorScheme.outlineVariant.withValues(alpha: 0.4),
+                ),
+              ),
               child: Ink(
                 decoration: _task.isCompleted
                     ? const BoxDecoration(
@@ -257,11 +269,15 @@ class _TodoDetailScreenState extends State<TodoDetailScreen> {
                   ),
                 ),
               ),
-            Text('Description', style: theme.textTheme.titleSmall),
+            Text(
+              'Description',
+              style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 8),
             Text(
               _task.description,
               style: theme.textTheme.bodyLarge?.copyWith(
+                height: 1.45,
                 color: _task.isCompleted ? colorScheme.onSurfaceVariant : null,
               ),
             ),

@@ -801,19 +801,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            colorScheme.primary.withValues(alpha: 0.08),
+            colorScheme.primary.withValues(alpha: 0.12),
             colorScheme.primary.withValues(alpha: 0.04),
+            colorScheme.surfaceContainerLowest,
           ],
+          stops: const [0.0, 0.55, 1.0],
         ),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.5),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.45),
           width: 1,
         ),
       ),
@@ -821,10 +823,28 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Row(
           children: [
-            Icon(
-              Icons.business_center,
-              size: 26,
-              color: colorScheme.primary,
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: colorScheme.surface,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.06),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Padding(
+                padding: const EdgeInsets.all(7),
+                child: Image.asset(
+                  'assets/icon/genesis_icon_foreground.png',
+                  fit: BoxFit.contain,
+                ),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -835,7 +855,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text(
                     'Genesis Employee',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
                       color: colorScheme.onSurface,
                     ),
                   ),
@@ -887,11 +908,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildTimeAndStatusCard(BuildContext context, ThemeData theme, ColorScheme colorScheme) {
     return Card(
-      elevation: 2,
+      elevation: 1.5,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
           width: 1,
         ),
       ),
@@ -906,6 +927,7 @@ class _HomeScreenState extends State<HomeScreen> {
               DateFormat('EEEE, d MMM yyyy').format(DateTime.now()),
               style: theme.textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(height: 16),
@@ -916,6 +938,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? colorScheme.outlineVariant.withValues(alpha: 0.2)
                     : (_isTracking ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12)),
                 borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: _statusCheckError
+                      ? colorScheme.outlineVariant.withValues(alpha: 0.5)
+                      : (_isTracking
+                          ? Colors.green.withValues(alpha: 0.35)
+                          : Colors.red.withValues(alpha: 0.35)),
+                ),
                 boxShadow: _isTracking && !_statusCheckError
                     ? [
                         BoxShadow(
@@ -967,7 +996,10 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1048,7 +1080,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   backgroundColor: _dutyStartTime != null ? colorScheme.error : Colors.green,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 3,
+                  elevation: 2,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -1108,7 +1140,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: colorScheme.outlineVariant.withValues(alpha: 0.4),
+          color: colorScheme.outlineVariant.withValues(alpha: 0.35),
           width: 1,
         ),
         boxShadow: [
@@ -1122,9 +1154,11 @@ class _HomeScreenState extends State<HomeScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            colorScheme.primary.withValues(alpha: 0.08),
+            colorScheme.primary.withValues(alpha: 0.10),
             colorScheme.primary.withValues(alpha: 0.04),
+            colorScheme.surface,
           ],
+          stops: const [0.0, 0.5, 1.0],
         ),
       ),
       child: Padding(
@@ -1137,7 +1171,7 @@ class _HomeScreenState extends State<HomeScreen> {
               "Today's Duty Time",
               style: theme.textTheme.labelMedium?.copyWith(
                 color: colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 6),
@@ -1203,27 +1237,27 @@ class _HomeScreenState extends State<HomeScreen> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(18),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(icon, color: color, size: 26),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Text(
                 title,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   fontSize: 14,
                   color: colorScheme.onSurface,
                 ),

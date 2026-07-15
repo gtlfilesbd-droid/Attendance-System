@@ -304,10 +304,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
     const gradientEnd = Color(0xFFFFFFFF);
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       clipBehavior: Clip.antiAlias,
       color: colorScheme.surface,
-      elevation: task.isCompleted ? 0 : null,
+      elevation: task.isCompleted ? 0 : 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
@@ -335,7 +335,9 @@ class _TodoListScreenState extends State<TodoListScreen> {
                     stops: [0.0, 0.35, 1.0],
                   ),
                 )
-              : null,
+              : BoxDecoration(
+                  color: colorScheme.surfaceContainerLowest.withValues(alpha: 0.6),
+                ),
           child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -536,8 +538,10 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final progress = _totalCount > 0 ? _completedCount / _totalCount : 0.0;
 
     return Scaffold(
+      backgroundColor: colorScheme.surfaceContainerLowest,
       appBar: AppBar(
         title: const Text('TO-DO'),
+        elevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -560,6 +564,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
           children: [
             if (_totalCount > 0 && !_isLoading)
               Card(
+                elevation: 0,
+                color: colorScheme.surface,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  side: BorderSide(
+                    color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                  ),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -592,6 +604,14 @@ class _TodoListScreenState extends State<TodoListScreen> {
                 ),
               ),
             Card(
+              elevation: 0,
+              color: colorScheme.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(
+                  color: colorScheme.outlineVariant.withValues(alpha: 0.35),
+                ),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -606,6 +626,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
+                            color: colorScheme.surfaceContainerLowest,
                             border: Border.all(color: colorScheme.outlineVariant),
                           ),
                           child: Row(
@@ -684,7 +705,19 @@ class _TodoListScreenState extends State<TodoListScreen> {
                             _fetchTasks();
                           },
                         ),
-                        border: const OutlineInputBorder(),
+                        filled: true,
+                        fillColor: colorScheme.surfaceContainerLowest,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: colorScheme.outlineVariant),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: colorScheme.primary, width: 2),
+                        ),
                       ),
                       onSubmitted: (_) => _fetchTasks(),
                     ),
@@ -780,9 +813,13 @@ class _AddTaskDialogState extends State<_AddTaskDialog> {
         controller: _controller,
         maxLines: 4,
         autofocus: true,
-        decoration: const InputDecoration(
+        decoration: InputDecoration(
           hintText: 'Task description',
-          border: OutlineInputBorder(),
+          filled: true,
+          fillColor: Theme.of(context).colorScheme.surfaceContainerLowest,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
         ),
         onSubmitted: (_) => _save(),
       ),

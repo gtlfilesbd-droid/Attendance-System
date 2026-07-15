@@ -60,8 +60,10 @@ class _TodoFormScreenState extends State<TodoFormScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('Edit Task')),
+      backgroundColor: colorScheme.surfaceContainerLowest,
+      appBar: AppBar(title: const Text('Edit Task'), elevation: 0),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -70,14 +72,32 @@ class _TodoFormScreenState extends State<TodoFormScreen> {
             TextField(
               controller: _controller,
               maxLines: 6,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Description',
-                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: colorScheme.surfaceContainerLowest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(color: colorScheme.primary, width: 2),
+                ),
               ),
             ),
             const SizedBox(height: 16),
             FilledButton(
               onPressed: _isSaving ? null : _save,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
               child: _isSaving
                   ? const SizedBox(
                       width: 20,
