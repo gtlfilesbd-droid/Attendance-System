@@ -346,6 +346,60 @@ class TodoDashboardStatusFilterTest(TestCase):
         self.assertEqual(response.context['status_filter'], 'completed')
 
 
+class TodoDashboardPastDateFilterTest(TestCase):
+    def setUp(self):
+        self.department = Department.objects.create(name='IT')
+        self.employee = _create_employee(department=self.department)
+        self.staff = User.objects.create_user(username='staff-past', password='pass', is_staff=True)
+        self.employee.user = self.staff
+        self.employee.save(update_fields=['user'])
+        perm = UserDepartmentPermission.objects.create(user=self.staff)
+        perm.departments.add(self.department)
+        self.today = timezone.localdate()
+        self.past_date = self.today - timedelta(days=7)
+        TodoTask.objects.create(
+            employee=self.employee,
+            title='Task-01',
+            description='Past pending',
+            task_date=self.past_date,
+            sort_order=1,
+            is_completed=False,
+        )
+        TodoTask.objects.create(
+            employee=self.employee,
+            title='Task-02',
+            description='Past done',
+            task_date=self.past_date,
+            sort_order=2,
+            is_completed=True,
+        )
+
+    def test_past_date_filter_loads_tasks(self):
+        from django.test import Client, override_settings
+
+        with override_settings(ALLOWED_HOSTS=['testserver']):
+            client = Client()
+            client.force_login(self.staff)
+            response = client.get('/dashboard/todos/', {
+                'date': self.past_date.isoformat(),
+                'view': 'team',
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['selected_date'], self.past_date)
+        self.assertEqual(response.context['min_date'], self.today - timedelta(days=3 * 365))
+        self.assertEqual(len(response.context['pending_tasks']), 1)
+        self.assertEqual(len(response.context['completed_tasks']), 1)
+        self.assertFalse(response.context['can_add'])
+        self.assertFalse(response.context['can_add_for_team'])
+        min_attr = f'min="{response.context["min_date"].isoformat()}"'.encode()
+        self.assertIn(min_attr, response.content)
+        self.assertNotIn(f'min="{self.today.isoformat()}"'.encode(), response.content)
+
+    def test_create_still_rejects_past_dates(self):
+        with self.assertRaises(Exception):
+            validate_task_date_for_create(self.past_date)
+
+
 class TodoSplitPermissionTest(TestCase):
     def setUp(self):
         self.department = Department.objects.create(name='IT')

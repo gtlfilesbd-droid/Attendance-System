@@ -312,7 +312,7 @@
         <div class="col-md-2">
             <label class="form-label">Date</label>
             <input type="date" class="form-control" name="date" value="{{ selected_date|date:'Y-m-d' }}"
-                   min="{{ today|date:'Y-m-d' }}" max="{{ max_date|date:'Y-m-d' }}">
+                   min="{{ min_date|date:'Y-m-d' }}" max="{{ max_date|date:'Y-m-d' }}">
         </div>
         <div class="col-md-{% if view_mode == 'team' %}2{% else %}3{% endif %}">
             <label class="form-label">Search</label>

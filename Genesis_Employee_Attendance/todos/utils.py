@@ -9,6 +9,7 @@ from .models import TodoTask
 from .permissions import resolve_employee
 
 MAX_FUTURE_DAYS = 30
+MAX_PAST_DAYS = 3 * 365  # Dashboard filter lookback for viewing past tasks
 
 
 def validate_task_date_for_create(task_date) -> None:

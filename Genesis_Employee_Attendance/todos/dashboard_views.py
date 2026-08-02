@@ -14,6 +14,8 @@ from employees.models import Department, Employee
 from .models import EmployeeTodoPermission, TodoTask
 from .permissions import resolve_employee
 from .utils import (
+    MAX_FUTURE_DAYS,
+    MAX_PAST_DAYS,
     format_task_title,
     get_next_sort_order,
     user_can_delete_task,
@@ -106,7 +108,8 @@ def todos_dashboard(request):
         return HttpResponseForbidden('Staff access required.')
 
     today = timezone.localdate()
-    max_date = today + timedelta(days=30)
+    min_date = today - timedelta(days=MAX_PAST_DAYS)
+    max_date = today + timedelta(days=MAX_FUTURE_DAYS)
 
     date_str = request.GET.get('date')
     if date_str:
@@ -160,8 +163,9 @@ def todos_dashboard(request):
     if not request.user.is_superuser:
         departments = departments.filter(id__in=permitted.values_list('id', flat=True))
 
-    can_add = bool(employee)
-    can_edit = can_add
+    date_allows_create = today <= selected_date <= max_date
+    can_add = bool(employee) and date_allows_create
+    can_edit = bool(employee)
     addable_employees = []
     addable_employees_all = []
     if view_mode == 'team' and request.user.is_staff:
@@ -184,7 +188,11 @@ def todos_dashboard(request):
                 emp for emp in addable_employees
                 if emp.department_id and emp.department.name == department
             ]
-    can_add_for_team = bool(addable_employees_all) if view_mode == 'team' and request.user.is_staff else False
+    can_add_for_team = (
+        bool(addable_employees_all) and date_allows_create
+        if view_mode == 'team' and request.user.is_staff
+        else False
+    )
     filter_employees = list(_employees_for_team_filter(request, department))
     filter_employees_all = [
         {
@@ -199,6 +207,7 @@ def todos_dashboard(request):
 
     context = {
         'today': today,
+        'min_date': min_date,
         'max_date': max_date,
         'selected_date': selected_date,
         'search': search,
