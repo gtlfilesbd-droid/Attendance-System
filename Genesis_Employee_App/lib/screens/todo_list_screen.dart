@@ -37,11 +37,13 @@ class _TodoListScreenState extends State<TodoListScreen> {
     return DateTime(now.year, now.month, now.day);
   }
 
+  DateTime get _minPastDate => _today.subtract(const Duration(days: 365));
+
   DateTime get _maxFutureDate => _today.add(const Duration(days: 30));
 
   bool get _canAddOnSelectedDate {
     final selected = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    return !selected.isBefore(_today) && !selected.isAfter(_maxFutureDate);
+    return !selected.isBefore(_minPastDate) && !selected.isAfter(_maxFutureDate);
   }
 
   List<TodoTask> get _filteredTasks {
@@ -120,7 +122,7 @@ class _TodoListScreenState extends State<TodoListScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
-      firstDate: _today.subtract(const Duration(days: 365)),
+      firstDate: _minPastDate,
       lastDate: _maxFutureDate,
     );
     if (picked != null && mounted) {

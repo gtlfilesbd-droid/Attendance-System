@@ -13,10 +13,11 @@ MAX_PAST_DAYS = 3 * 365  # Dashboard filter lookback for viewing past tasks
 
 
 def validate_task_date_for_create(task_date) -> None:
-    """Reject past dates and dates more than 30 days in the future."""
+    """Reject dates older than lookback and dates more than 30 days in the future."""
     today = timezone.localdate()
-    if task_date < today:
-        raise ValidationError('Cannot add tasks for past dates.')
+    min_date = today - timedelta(days=MAX_PAST_DAYS)
+    if task_date < min_date:
+        raise ValidationError('Cannot add tasks older than the allowed lookback period.')
     if task_date > today + timedelta(days=MAX_FUTURE_DAYS):
         raise ValidationError('Tasks can only be planned up to 30 days ahead.')
 

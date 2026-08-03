@@ -163,7 +163,7 @@ def todos_dashboard(request):
     if not request.user.is_superuser:
         departments = departments.filter(id__in=permitted.values_list('id', flat=True))
 
-    date_allows_create = today <= selected_date <= max_date
+    date_allows_create = min_date <= selected_date <= max_date
     can_add = bool(employee) and date_allows_create
     can_edit = bool(employee)
     addable_employees = []

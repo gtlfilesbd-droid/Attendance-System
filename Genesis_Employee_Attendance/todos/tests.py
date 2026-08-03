@@ -10,7 +10,12 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from employees.models import Department, Employee, UserDepartmentPermission
 from .dashboard_views import todos_add_task
 from .models import EmployeeTodoPermission, TodoTask
-from .utils import format_task_title, get_next_sort_order, validate_task_date_for_create
+from .utils import (
+    MAX_PAST_DAYS,
+    format_task_title,
+    get_next_sort_order,
+    validate_task_date_for_create,
+)
 
 
 def _create_employee(employee_id='EMP001', email='emp1@test.com', department=None):
@@ -52,10 +57,14 @@ class TodoUtilsTest(TestCase):
         self.assertEqual(first, 1)
         self.assertEqual(second, 2)
 
-    def test_validate_past_date_rejected(self):
+    def test_validate_recent_past_date_allowed(self):
         past = timezone.localdate() - timedelta(days=1)
+        validate_task_date_for_create(past)  # should not raise
+
+    def test_validate_beyond_lookback_rejected(self):
+        too_old = timezone.localdate() - timedelta(days=MAX_PAST_DAYS + 1)
         with self.assertRaises(Exception):
-            validate_task_date_for_create(past)
+            validate_task_date_for_create(too_old)
 
     def test_validate_beyond_30_days_rejected(self):
         future = timezone.localdate() + timedelta(days=31)
@@ -106,11 +115,21 @@ class TodoAPITest(TestCase):
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-    def test_past_date_rejected(self):
+    def test_past_date_allowed(self):
         past = self.today - timedelta(days=1)
         response = self.client.post('/api/todos/tasks/', {
             'description': 'Past task',
             'task_date': past.isoformat(),
+        }, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(response.data['success'])
+        self.assertEqual(response.data['data']['task_date'], past.isoformat())
+
+    def test_beyond_lookback_rejected(self):
+        too_old = self.today - timedelta(days=MAX_PAST_DAYS + 1)
+        response = self.client.post('/api/todos/tasks/', {
+            'description': 'Too old task',
+            'task_date': too_old.isoformat(),
         }, format='json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
@@ -389,15 +408,16 @@ class TodoDashboardPastDateFilterTest(TestCase):
         self.assertEqual(response.context['min_date'], self.today - timedelta(days=3 * 365))
         self.assertEqual(len(response.context['pending_tasks']), 1)
         self.assertEqual(len(response.context['completed_tasks']), 1)
-        self.assertFalse(response.context['can_add'])
-        self.assertFalse(response.context['can_add_for_team'])
+        self.assertTrue(response.context['can_add'])
+        self.assertTrue(response.context['can_add_for_team'])
         min_attr = f'min="{response.context["min_date"].isoformat()}"'.encode()
         self.assertIn(min_attr, response.content)
         self.assertNotIn(f'min="{self.today.isoformat()}"'.encode(), response.content)
 
-    def test_create_still_rejects_past_dates(self):
+    def test_create_rejects_beyond_lookback(self):
+        too_old = self.today - timedelta(days=MAX_PAST_DAYS + 1)
         with self.assertRaises(Exception):
-            validate_task_date_for_create(self.past_date)
+            validate_task_date_for_create(too_old)
 
 
 class TodoSplitPermissionTest(TestCase):
