@@ -2,11 +2,54 @@ from django.contrib import admin
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 from django.utils.safestring import mark_safe
 from config.admin_export import AdminExportMixin
 from .models import Employee, Department, Designation, DeviceToken
 from .department_permissions import get_permitted_departments
+
+
+# Related managers whose rows must not be loaded into the delete confirmation page.
+# Format: (related_name, verbose label for confirmation summary)
+_EMPLOYEE_RELATED_COUNTS = (
+    ('location_logs', 'location logs'),
+    ('mobile_logs', 'mobile logs'),
+    ('login_logs', 'login logs'),
+    ('location_anomalies', 'location anomalies'),
+    ('attendances', 'attendance records'),
+    ('duty_sessions', 'duty sessions'),
+    ('leave_assignments', 'leave assignments'),
+    ('todo_tasks', 'to-do tasks'),
+    ('device_tokens', 'device tokens'),
+)
+
+
+def _purge_employee_related(employee):
+    """
+    Efficiently delete high-volume related rows before removing an Employee.
+    Avoids NestedObjects / ORM collector loading every LocationLog into memory.
+    Linked Django User is unlinked, not deleted.
+    """
+    from attendance.models import Attendance, DutySession, LeaveAssignment
+    from audit.models import MobileLog, UserLoginLog
+    from todos.models import EmployeeTodoPermission, TodoTask
+    from tracking.models import LocationAnomaly, LocationLog
+
+    LocationLog.objects.filter(employee=employee).delete()
+    MobileLog.objects.filter(employee=employee).delete()
+    UserLoginLog.objects.filter(employee=employee).delete()
+    LocationAnomaly.objects.filter(employee=employee).delete()
+    Attendance.objects.filter(employee=employee).delete()
+    DutySession.objects.filter(employee=employee).delete()
+    LeaveAssignment.objects.filter(employee=employee).delete()
+    TodoTask.objects.filter(employee=employee).delete()
+    TodoTask.objects.filter(assigned_by=employee).update(assigned_by=None)
+    EmployeeTodoPermission.objects.filter(employee=employee).delete()
+    DeviceToken.objects.filter(employee=employee).delete()
+    if employee.user_id:
+        Employee.objects.filter(pk=employee.pk).update(user=None)
+        employee.user = None
 
 
 class EmployeeAdminForm(forms.ModelForm):
@@ -131,7 +174,61 @@ class EmployeeAdmin(AdminExportMixin, admin.ModelAdmin):
             permitted = get_permitted_departments(request.user)
             kwargs['queryset'] = permitted
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
-    
+
+    def get_deleted_objects(self, objs, request):
+        """
+        Summarize related row counts instead of NestedObjects loading every
+        LocationLog / MobileLog into the confirmation page (which times out).
+        """
+        deleted_objects = []
+        model_count = {}
+        for obj in objs:
+            related_lines = []
+            for related_name, label in _EMPLOYEE_RELATED_COUNTS:
+                manager = getattr(obj, related_name, None)
+                if manager is None:
+                    continue
+                try:
+                    count = manager.count()
+                except Exception:
+                    continue
+                if count:
+                    model_count[label] = model_count.get(label, 0) + count
+                    related_lines.append(f'{count} {label}')
+            # OneToOne todo permission (optional)
+            if hasattr(obj, 'todo_permission'):
+                model_count['to-do permissions'] = model_count.get('to-do permissions', 0) + 1
+                related_lines.append('1 to-do permission')
+            assigned_count = getattr(obj, 'todo_tasks_assigned', None)
+            if assigned_count is not None:
+                try:
+                    n = assigned_count.count()
+                except Exception:
+                    n = 0
+                if n:
+                    model_count['assigned-by references (will be cleared)'] = (
+                        model_count.get('assigned-by references (will be cleared)', 0) + n
+                    )
+                    related_lines.append(f'{n} assigned-by references (cleared, not deleted)')
+            if obj.user_id:
+                related_lines.append('linked Django user (unlinked, not deleted)')
+            if related_lines:
+                deleted_objects.append([str(obj), related_lines])
+            else:
+                deleted_objects.append(str(obj))
+        return deleted_objects, model_count, set(), []
+
+    def delete_model(self, request, obj):
+        with transaction.atomic():
+            _purge_employee_related(obj)
+            obj.delete()
+
+    def delete_queryset(self, request, queryset):
+        with transaction.atomic():
+            for obj in queryset:
+                _purge_employee_related(obj)
+            queryset.delete()
+
     def save_model(self, request, obj, form, change):
         # Hash password if it's being set/changed (and not blank).
         # Blank means "keep existing password".
