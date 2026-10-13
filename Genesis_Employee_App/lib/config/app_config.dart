@@ -5,7 +5,7 @@ class AppConfig {
   /// (No trailing slash after /api; endpoints are e.g. /employees/auth/login/.)
   static const String baseUrl = String.fromEnvironment(
     'BASE_URL',
-    defaultValue: 'http://103.29.60.233:8000/api',
+    defaultValue: 'http://163.227.115.152:8000/api',
   );
   /// True when base URL uses HTTPS (production-safe).
   static bool get isSecureBaseUrl => baseUrl.startsWith('https://');
@@ -119,5 +119,5 @@ class AppConfig {
 
   // App Configuration
   static const String appName = 'Genesis Employee';
-  static const String appVersion = '4.0.0';
+  static const String appVersion = '4.0.1';
 }
